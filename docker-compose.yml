@@ -97,6 +97,62 @@ services:
         condition: service_healthy
       flaresolverr:
         condition: service_started
+
+  collector_service:
+    build:
+      context: .
+      dockerfile: ./apps/collector/collector_service/Dockerfile
+    environment:
+      - APP_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - APP_REDIS_URL=redis://redis:6379
+      - APP_DATABASE_URL=postgres://huginn:huginn_password@postgres:5433/huginn
+      - APP_TOTAL_PARTITIONS=1
+      - APP_PARTITION_ID=0
+      - APP_HEALTH_CHECK_INTERVAL=30
+      - APP_HEARTBEAT_INTERVAL=10
+      - APP_RECOVERY_ATTEMPTS=3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  collector_service_dev:
+    build:
+      context: .
+      dockerfile: ./apps/collector/collector_service/Dockerfile.dev
+    environment:
+      - APP_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - APP_REDIS_URL=redis://redis:6379
+      - APP_DATABASE_URL=postgres://huginn:huginn_password@postgres:5432/huginn
+      - APP_TOTAL_PARTITIONS=1
+      - APP_PARTITION_ID=0
+      - APP_HEALTH_CHECK_INTERVAL=30
+      - APP_HEARTBEAT_INTERVAL=10
+      - APP_RECOVERY_ATTEMPTS=3
+      - APP_FLARESOLVERR_URL=http://flaresolverr:8191/v1
+    volumes:
+      - .:/usr/src/app
+      - target:/usr/src/app/target
+      - cargo-cache:/usr/local/cargo/registry
+    command: cargo run --bin collector_service
+    develop:
+      watch:
+        - action: rebuild
+          path: ./apps/collector/collector_service
+          target: collector_service_dev
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      flaresolverr:
+        condition: service_started
+
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr
@@ -107,7 +163,43 @@ services:
     ports:
       - "8191:8191"
     restart: unless-stopped
-    
+
+  writer_service:
+    build:
+      context: .
+      dockerfile: ./apps/collector/writer_service/Dockerfile
+    environment:
+      - APP_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - APP_DATABASE_URL=postgres://huginn:huginn_password@postgres:5432/huginn
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  writer_service_dev:
+    build:
+      context: .
+      dockerfile: ./apps/collector/writer_service/Dockerfile.dev
+    environment:
+      - APP_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - APP_DATABASE_URL=postgres://huginn:huginn_password@postgres:5432/huginn
+    volumes:
+      - .:/usr/src/app
+      - target:/usr/src/app/target
+      - cargo-cache:/usr/local/cargo/registry
+    command: cargo run --bin writer_service
+    develop:
+      watch:
+        - action: rebuild
+          path: ./apps/collector/writer_service
+          target: writer_service_dev
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
 volumes:
   rabbitmq_data:
   postgres_data:

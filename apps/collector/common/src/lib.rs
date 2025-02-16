@@ -1,3 +1,7 @@
+pub mod error;
+pub mod flaresolverr;
+pub mod recovery;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
@@ -51,17 +55,6 @@ pub struct StreamerStatus {
     pub title: Option<String>,
 }
 
-/// Chat message types
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "message_type", rename_all = "snake_case")]
-pub enum ChatMessageType {
-    Regular,
-    Subscription,
-    Donation,
-    Moderation,
-    System,
-}
-
 /// Chat message structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -69,7 +62,6 @@ pub struct ChatMessage {
     pub username: String,
     pub message: String,
     pub timestamp: DateTime<Utc>,
-    pub message_type: ChatMessageType,
     pub metadata: Option<ChatMessageMetadata>,
 }
 
@@ -113,7 +105,7 @@ pub struct RecoveryState {
 #[derive(Error, Debug)]
 pub enum ServiceError {
     #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
+    Database(#[from] sea_orm::DbErr),
 
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
@@ -135,6 +127,12 @@ pub enum ServiceError {
 
     #[error("APIProxy error: {0}")]
     ApiProxyError(String),
+
+    #[error("API error: {0}")]
+    ApiError(String),
+
+    #[error("Parse error: {0}")]
+    ParseError(String),
 }
 
 /// Redis keys and prefixes
@@ -169,6 +167,9 @@ impl RabbitMQConfig {
     pub const STREAMER_STATUS_QUEUE: &'static str = "streamer.status.queue";
     pub const CHAT_MESSAGES_QUEUE: &'static str = "chat.messages.queue";
     pub const SYSTEM_EVENTS_QUEUE: &'static str = "system.events.queue";
+
+    pub const STREAMER_STATUS_ROUTING_KEY: &'static str = "streamer.status.{}";
+    pub const CHAT_MESSAGES_ROUTING_KEY: &'static str = "chat.message";
 }
 
 /// Utility functions
@@ -260,7 +261,6 @@ mod tests {
     }
 }
 
-
 pub mod config {
     use config::{Config, ConfigError, Environment};
     use dotenv::dotenv;
@@ -295,5 +295,3 @@ pub mod config {
         }
     }
 }
-
- 

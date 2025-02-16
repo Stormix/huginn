@@ -29,7 +29,7 @@ impl RecoveryManager {
 
         loop {
             attempts += 1;
-            
+
             match operation().await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
@@ -56,21 +56,25 @@ impl RecoveryManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     #[tokio::test]
     async fn test_successful_operation() {
-        let recovery = RecoveryManager::new(3, Duration::from_millis(10), Duration::from_millis(100));
-        let result = recovery.execute(|| async { Ok::<_, MonitorError>(42) }).await;
+        let recovery =
+            RecoveryManager::new(3, Duration::from_millis(10), Duration::from_millis(100));
+        let result = recovery
+            .execute(|| async { Ok::<_, MonitorError>(42) })
+            .await;
         assert_eq!(result.unwrap(), 42);
     }
 
     #[tokio::test]
     async fn test_retry_then_success() {
         let attempts = Arc::new(AtomicU32::new(0));
-        let recovery = RecoveryManager::new(3, Duration::from_millis(10), Duration::from_millis(100));
-        
+        let recovery =
+            RecoveryManager::new(3, Duration::from_millis(10), Duration::from_millis(100));
+
         let attempts_clone = attempts.clone();
         let operation = move || {
             let attempts = attempts_clone.clone();
@@ -91,10 +95,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_max_attempts_reached() {
-        let recovery = RecoveryManager::new(3, Duration::from_millis(10), Duration::from_millis(100));
-        
+        let recovery =
+            RecoveryManager::new(3, Duration::from_millis(10), Duration::from_millis(100));
+
         let result = recovery
-            .execute(|| async { Err::<(), MonitorError>(MonitorError::Other("Always fails".into())) })
+            .execute(|| async {
+                Err::<(), MonitorError>(MonitorError::Other("Always fails".into()))
+            })
             .await;
 
         assert!(matches!(
@@ -105,9 +112,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_exponential_backoff() {
-        let recovery = RecoveryManager::new(3, Duration::from_millis(10), Duration::from_millis(30));
+        let recovery =
+            RecoveryManager::new(3, Duration::from_millis(10), Duration::from_millis(30));
         let timestamps = Arc::new(std::sync::Mutex::new(vec![]));
-        
+
         let timestamps_clone = timestamps.clone();
         let operation = move || {
             let timestamps = timestamps_clone.clone();
@@ -118,14 +126,14 @@ mod tests {
         };
 
         let _: Result<(), MonitorError> = recovery.execute(operation).await;
-        
+
         let timestamps = timestamps.lock().unwrap();
         assert_eq!(timestamps.len(), 3);
-        
+
         // Check that delays between attempts are increasing
         let delay1 = timestamps[1].duration_since(timestamps[0]);
         let delay2 = timestamps[2].duration_since(timestamps[1]);
-        
+
         assert!(delay1 >= Duration::from_millis(10));
         assert!(delay2 >= Duration::from_millis(20));
         assert!(delay2 <= Duration::from_millis(35)); // Add small buffer for timing variations

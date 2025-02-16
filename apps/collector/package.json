@@ -3,7 +3,7 @@
   "scripts": {
     "dev": "cross-env RUST_LOG=info cargo watch -x 'run --bin collector_service' -w ./",
     "build": "cargo build --release",
-    "format": "cargo fmt --check",
+    "format": "cargo fmt",
     "lint": "cargo clippy --fix --allow-dirty --allow-staged",
     "clean": "cargo clean"
   }

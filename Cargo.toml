@@ -1,5 +1,7 @@
 [workspace]
 members = [
   "apps/collector",
+  "apps/collector/entity",
+  "apps/collector/migration",
 ]
 resolver = "3"

@@ -1,0 +1,6 @@
+FROM rust:1.75
+
+WORKDIR /usr/src/app
+
+# We'll mount the source code and target directory as volumes
+CMD ["cargo", "run", "--bin", "collector_service"]

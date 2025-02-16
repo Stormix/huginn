@@ -1,30 +1,23 @@
-mod recovery;
-mod error;
-mod flaresolverr;
-
-use crate::recovery::RecoveryManager;
-use crate::error::MonitorError;
-use crate::flaresolverr::FlareSolverrClient;
+use common::error::MonitorError;
+use common::flaresolverr::FlareSolverrClient;
+use common::recovery::RecoveryManager;
 
 use common::{
-    AlertType, HealthStatus, PartitionConfig, Partitionable, RabbitMQConfig, RecoveryState, RedisKeys, ServiceError, ServiceStatus, StreamerStatus, SystemAlert
+    AlertType, HealthStatus, PartitionConfig, Partitionable, RabbitMQConfig, RecoveryState,
+    RedisKeys, ServiceError, ServiceStatus, StreamerStatus, SystemAlert,
 };
 
 use chrono::Utc;
+use common::config::ServiceConfig;
 use lapin::{
     BasicProperties, Channel, Connection, ConnectionProperties, options::*, types::FieldTable,
 };
 use redis::Client as RedisClient;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio;
-use tracing::{error as tracing_error, info as tracing_info, warn as tracing_warn};
-use std::collections::HashMap;
-use common::config::ServiceConfig;
 use tokio::time::sleep;
-use reqwest;
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use tracing::{error as tracing_error, info as tracing_info, warn as tracing_warn};
 
 /// Main service structure
 struct MonitorService {
@@ -47,7 +40,7 @@ impl MonitorService {
         streamers: Vec<String>,
     ) -> Result<Self, ServiceError> {
         tracing_info!("Initializing monitor service");
-        
+
         // Initialize RabbitMQ connection
         let conn =
             Connection::connect(&config.rabbitmq_url, ConnectionProperties::default()).await?;
@@ -122,14 +115,14 @@ impl MonitorService {
 
         Ok(())
     }
- 
+
     /// Check streamer status
     async fn make_api_call(&self, username: &str) -> Result<StreamerStatus, MonitorError> {
         let url = format!("https://kick.com/api/v2/channels/{}", username);
-        
+
         // Use FlareSolverr client to make the request
         let response_body = self.flaresolverr_client.get(&url).await?;
-        
+
         // Parse the response
         let data = serde_json::from_str::<serde_json::Value>(&response_body)
             .map_err(|e| MonitorError::ApiError(format!("Failed to parse JSON: {}", e)))?;
@@ -137,15 +130,13 @@ impl MonitorService {
         // Extract relevant fields from the response
         let status = StreamerStatus {
             username: username.to_string(),
-            is_live: data["livestream"].is_object() && 
-                     data["livestream"]["is_live"].as_bool().unwrap_or(false),
+            is_live: data["livestream"].is_object()
+                && data["livestream"]["is_live"].as_bool().unwrap_or(false),
             timestamp: Utc::now(),
             viewers: data["livestream"]["viewer_count"]
                 .as_u64()
                 .map(|v| v as i32),
-            stream_id: data["livestream"]["id"]
-                .as_u64()
-                .map(|id| id.to_string()),
+            stream_id: data["livestream"]["id"].as_u64().map(|id| id.to_string()),
             title: data["livestream"]["session_title"]
                 .as_str()
                 .map(|s| s.to_string()),
@@ -161,7 +152,8 @@ impl MonitorService {
                     &serde_json::to_vec(&status).map_err(ServiceError::Serialization)?,
                     BasicProperties::default(),
                 )
-                .await.map_err(ServiceError::RabbitMQ)?;
+                .await
+                .map_err(ServiceError::RabbitMQ)?;
         }
 
         Ok(status)
@@ -225,7 +217,8 @@ impl MonitorService {
                 &serde_json::to_vec(&alert).map_err(ServiceError::Serialization)?,
                 BasicProperties::default(),
             )
-            .await.map_err(ServiceError::RabbitMQ)?;
+            .await
+            .map_err(ServiceError::RabbitMQ)?;
 
         Ok(())
     }
@@ -235,16 +228,24 @@ impl MonitorService {
 
         // Get last known state from Redis
         let recovery_key = RedisKeys::recovery_key(self.partition_config.partition_id);
-        let mut conn = self.redis_client.get_multiplexed_async_connection().await.map_err(ServiceError::Redis)?;
+        let mut conn = self
+            .redis_client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(ServiceError::Redis)?;
 
         if let Ok(recovery_data) = redis::cmd("GET")
             .arg(&recovery_key)
             .query_async::<String>(&mut conn)
             .await
         {
-            let recovery_state: RecoveryState = serde_json::from_str(&recovery_data).map_err(ServiceError::Serialization)?;
+            let recovery_state: RecoveryState =
+                serde_json::from_str(&recovery_data).map_err(ServiceError::Serialization)?;
 
-            tracing_info!("Found recovery state with {} missed streamers", recovery_state.missed_streamers.len());
+            tracing_info!(
+                "Found recovery state with {} missed streamers",
+                recovery_state.missed_streamers.len()
+            );
 
             // Replay missed checks
             for streamer in recovery_state.missed_streamers {
@@ -287,7 +288,7 @@ impl MonitorService {
                     for streamer in &assigned_streamers {
                         match self.check_streamer(streamer).await {
                             Ok(status) => {
-                                tracing_info!("Checked status for {}: is_live={}", streamer, status.is_live);
+                                tracing_info!("Checked status for {}: is_live={} viewers={}", streamer, status.is_live, status.viewers.unwrap_or(0));
                             }
                             Err(MonitorError::RateLimited { wait_time_secs }) => {
                                 tracing_warn!("Rate limited, waiting {} seconds", wait_time_secs);
@@ -303,7 +304,7 @@ impl MonitorService {
                 _ = heartbeat_interval.tick() => {
                     if let Err(e) = self.register_heartbeat().await {
                         tracing_error!("Failed to register heartbeat: {:?}", e);
-                        
+
                         let mut counter = self.error_counter.lock().await;
                         let count = counter.entry("heartbeat".to_string()).or_insert(0);
                         *count += 1;
@@ -335,91 +336,10 @@ impl MonitorService {
             .arg(RedisKeys::heartbeat_key(self.partition_config.partition_id))
             .exec_async(&mut conn)
             .await?;
-        
+
         tracing_info!("Cleanup completed, shutdown successful");
         Ok(())
     }
-}
-
-#[derive(Serialize)]
-struct FlareSolverrRequest {
-    cmd: String,
-    url: String,
-    #[serde(rename = "maxTimeout")]
-    max_timeout: u32,
-}
-
-#[derive(Deserialize, Debug)]
-struct FlareSolverrResponse {
-    status: String,
-    message: String,
-    solution: FlareSolverrSolution,
-}
-
-#[derive(Deserialize, Debug)]
-struct FlareSolverrSolution {
-    url: String,
-    status: u32,
-    response: Option<String>,
-    cookies: Vec<FlareSolverrCookie>,
-}
-
-#[derive(Deserialize, Debug)]
-struct FlareSolverrCookie {
-    domain: String,
-    #[serde(rename = "httpOnly")]
-    http_only: bool,
-    name: String,
-    path: String,
-    #[serde(rename = "sameSite")]
-    same_site: Option<String>,
-    secure: bool,
-}
-
-async fn send_get_request(url: &str) -> Result<String, MonitorError> {
-    let flaresolverr_url = "http://flaresolverr:8191/v1";
-    let client = Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| MonitorError::ApiError(e.to_string()))?;
-
-    let payload = FlareSolverrRequest {
-        cmd: "request.get".to_string(),
-        url: url.to_string(),
-        max_timeout: 60000,
-    };
-
-    let response = client
-        .post(flaresolverr_url)
-        .header("Content-Type", "application/json")
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| MonitorError::ApiError(format!("FlareSolverr request failed: {}", e)))?;
-
-    let status = response.status();
-    let response_text = response.text().await
-        .map_err(|e| MonitorError::ApiError(format!("Failed to get response text: {}", e)))?;
-    
-    if !status.is_success() {
-        tracing_error!("FlareSolverr error response: {}", response_text);
-        return Err(MonitorError::ApiError(format!(
-            "FlareSolverr returned status code: {} with body: {}",
-            status,
-            response_text
-        )));
-    }
-
-    let flare_response = serde_json::from_str::<FlareSolverrResponse>(&response_text)
-        .map_err(|e| MonitorError::ApiError(format!("Failed to parse JSON: {} for response: {}", e, response_text)))?;
-
-    // Extract JSON from HTML response
-    let html_response = flare_response.solution.response
-        .ok_or_else(|| MonitorError::ApiError("No response in solution".to_string()))?;
-    let json_start = html_response.find('{').ok_or_else(|| MonitorError::ApiError("No JSON found in response".to_string()))?;
-    let json_end = html_response.rfind('}').ok_or_else(|| MonitorError::ApiError("No JSON end found in response".to_string()))?;
-    
-    Ok(html_response[json_start..=json_end].to_string())
 }
 
 #[tokio::main]
@@ -428,9 +348,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let settings = ServiceConfig::new().expect("Failed to load configuration");
-    
+
     tracing_info!("Initializing monitor service");
-    tracing_info!("Partition configuration: id={}, total={}", 
+    tracing_info!(
+        "Partition configuration: id={}, total={}",
         settings.partition_id,
         settings.total_partitions
     );
@@ -444,15 +365,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "ilyaselmaliki".to_string(),
         "111fox".to_string(),
         "rainman-fps".to_string(),
+        "ahmedsabiri".to_string(),
+        "chaos333gg".to_string(),
     ];
 
     // Create and run service
     let service = MonitorService::new(settings, partition_config, streamers).await?;
     let service = Arc::new(service);
-    
+
     // Set up shutdown signal handlers for both SIGTERM and SIGINT
     let shutdown_service = service.clone();
-    
+
     #[cfg(unix)]
     let term = async {
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
