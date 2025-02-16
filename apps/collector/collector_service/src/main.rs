@@ -80,6 +80,35 @@ impl ChatCollector {
             )
             .await?;
 
+        // Declare exchanges and queues
+        channel
+            .exchange_declare(
+                RabbitMQConfig::CHAT_MESSAGES_EXCHANGE,
+                lapin::ExchangeKind::Direct,
+                ExchangeDeclareOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+
+        // Create and bind queue
+        channel
+            .queue_declare(
+                RabbitMQConfig::CHAT_MESSAGES_QUEUE,
+                QueueDeclareOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+
+        channel
+            .queue_bind(
+                RabbitMQConfig::CHAT_MESSAGES_QUEUE,
+                RabbitMQConfig::CHAT_MESSAGES_EXCHANGE,
+                RabbitMQConfig::CHAT_MESSAGES_ROUTING_KEY,
+                QueueBindOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+
         // Set up consumer
         info!("Setting up RabbitMQ consumer...");
         let consumer = channel
