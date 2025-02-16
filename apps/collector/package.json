@@ -1,0 +1,10 @@
+{
+  "name": "@huginn/collector",
+  "scripts": {
+    "dev": "cross-env RUST_LOG=info cargo watch -x run -p collector -w ./",
+    "build": "cargo build --release",
+    "format": "cargo fmt --check",
+    "lint": "cargo clippy --fix --allow-dirty --allow-staged",
+    "clean": "cargo clean"
+  }
+}

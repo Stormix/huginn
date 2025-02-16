@@ -1,0 +1,38 @@
+# Rust specific
+**/target/
+**/*.rs.bk
+Cargo.lock
+*.pdb
+
+# TypeScript/JavaScript specific
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.env*
+
+# pnpm specific
+.pnpm-store/
+.pnpm-debug.log
+
+# IDE specific
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Debug logs
+npm-debug.log*
+debug.log
+
+coverage/
+
+.cargo/
+
+.turbo/
+
+# Ignore actual configuration files
+**/config/*.toml
+!**/config/*.example.toml
+
+.temp

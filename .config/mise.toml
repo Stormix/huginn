@@ -1,0 +1,7 @@
+[env]
+NODE_ENV = 'development'
+
+[tools]
+node = '23.8.0'
+pnpm = '10.4.0'
+rust = "latest"
