@@ -5,19 +5,17 @@
 		"prepare": "husky",
 		"lint": "turbo run lint --parallel",
 		"format": "turbo run format --parallel",
-		"db:up": "docker compose up -d",
-		"db:down": "docker compose down",
+		"composer:up": "docker compose up --build -d",
+		"composer:down": "docker compose down",
 		"collector:dev": "pnpm --filter @huginn/collector dev",
 		"clean": "turbo run clean",
-		"build": "turbo run build"
+		"build": "turbo run build",
+		"composer:dev": "docker compose up monitor_service_dev --build"
 	},
 	"devDependencies": {
 		"cross-env": "^7.0.3",
 		"husky": "^9.1.7",
 		"turbo": "^2.4.2"
 	},
-	"packageManager": "pnpm@10.4.0",
-	"dependencies": {
-		"@jdxcode/mise": "^2025.2.5"
-	}
+	"packageManager": "pnpm@10.4.0"
 }

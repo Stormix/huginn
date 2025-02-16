@@ -1,39 +1,116 @@
-version: '3.8'
-
 services:
-  postgres:
-    image: postgres:17
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: huginn
+  rabbitmq:
+    image: rabbitmq:3-management
     ports:
-      - "5432:5432"
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: timescale/timescaledb:latest-pg14
+    ports:
+      - "5433:5432"  # Changed from 5432:5432
+    environment:
+      - POSTGRES_USER=huginn
+      - POSTGRES_PASSWORD=huginn_password
+      - POSTGRES_DB=huginn
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U huginn"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:7
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    ports:
-      - "5672:5672"   # AMQP protocol port
-      - "15672:15672" # Management UI port
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+  monitor_service:
+    build:
+      context: .
+      dockerfile: ./apps/collector/monitor_service/Dockerfile
     environment:
-      - RABBITMQ_DEFAULT_USER=guest
-      - RABBITMQ_DEFAULT_PASS=guest
-    restart: unless-stopped
+      - APP_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - APP_REDIS_URL=redis://redis:6379
+      - APP_DATABASE_URL=postgres://huginn:huginn_password@postgres:5433/huginn
+      - APP_TOTAL_PARTITIONS=1
+      - APP_PARTITION_ID=0
+      - APP_HEALTH_CHECK_INTERVAL=30
+      - APP_HEARTBEAT_INTERVAL=10
+      - APP_RECOVERY_ATTEMPTS=3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
+  monitor_service_dev:
+    build:
+      context: .
+      dockerfile: ./apps/collector/monitor_service/Dockerfile.dev
+    environment:
+      - APP_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - APP_REDIS_URL=redis://redis:6379
+      - APP_DATABASE_URL=postgres://huginn:huginn_password@postgres:5433/huginn
+      - APP_TOTAL_PARTITIONS=1
+      - APP_PARTITION_ID=0
+      - APP_HEALTH_CHECK_INTERVAL=30
+      - APP_HEARTBEAT_INTERVAL=10
+      - APP_RECOVERY_ATTEMPTS=3
+      - APP_FLARESOLVERR_URL=http://flaresolverr:8191/v1
+    volumes:
+      - .:/usr/src/app
+      - target:/usr/src/app/target
+      - cargo-cache:/usr/local/cargo/registry
+    command: cargo run --bin monitor_service
+    develop:
+      watch:
+        - action: rebuild
+          path: ./apps/collector/monitor_service
+          target: monitor_service_dev
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      flaresolverr:
+        condition: service_started
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_HTML=${LOG_HTML:-false}
+      - TZ=Europe/London
+    ports:
+      - "8191:8191"
+    restart: unless-stopped
+    
 volumes:
+  rabbitmq_data:
   postgres_data:
   redis_data:
-  rabbitmq_data:
+  target:
+  cargo-cache:

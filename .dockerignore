@@ -1,0 +1,53 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Rust specific
+**/target/
+**/*.rs.bk
+Cargo.lock
+*.pdb
+
+# TypeScript/JavaScript specific
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.env*
+
+# pnpm specific
+.pnpm-store/
+.pnpm-debug.log
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Debug logs
+npm-debug.log*
+debug.log
+coverage/
+
+# Development tools
+.turbo/
+.husky/
+.cargo/
+.config/
+
+# Documentation and misc
+README.md
+CHANGELOG.md
+LICENSE
+*.md
+
+# Test files
+**/__tests__/
+**/*.test.*
+**/*.spec.*
+
+# Temporary files
+.temp/
