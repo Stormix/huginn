@@ -1,0 +1,91 @@
+name: Publish Docker images
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/collector/**'
+      - '.github/workflows/**'
+
+jobs:
+  push_to_registry:
+    name: Push Docker images to Docker Hub
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+      attestations: write
+      id-token: write
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.SSH_KEY }}
+
+      - name: Cache pnpm modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-
+
+      - uses: pnpm/action-setup@v4
+        name: Setup pnpm
+        with:
+          version: 10.4.0
+          run_install: true
+
+      - name: Read version from package.json
+        id: get_version
+        working-directory: ./apps/collector
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          echo "Current version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_ENV
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push monitor service
+        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        with:
+          context: .
+          file: ./apps/collector/monitor_service/Dockerfile
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/huginn-monitor:${{ env.version }}
+            ${{ secrets.DOCKER_USERNAME }}/huginn-monitor:latest
+
+      - name: Build and push collector service
+        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        with:
+          context: .
+          file: ./apps/collector/collector_service/Dockerfile
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/huginn-collector:${{ env.version }}
+            ${{ secrets.DOCKER_USERNAME }}/huginn-collector:latest
+
+      - name: Build and push writer service
+        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        with:
+          context: .
+          file: ./apps/collector/writer_service/Dockerfile
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/huginn-writer:${{ env.version }}
+            ${{ secrets.DOCKER_USERNAME }}/huginn-writer:latest

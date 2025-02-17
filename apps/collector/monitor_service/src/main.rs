@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error as tracing_error, info as tracing_info, warn as tracing_warn};
+use actix_web::{web, App, HttpResponse, HttpServer};
 
 /// Main service structure
 struct MonitorService {

@@ -16,7 +16,8 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{RwLock, mpsc};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{error, info};
-
+use actix_web::{web, App, HttpResponse, HttpServer};
+use serde_json::json;
 struct ChatCollector {
     partition_config: PartitionConfig,
     rabbit_consumer: Consumer,
@@ -289,7 +290,7 @@ impl ChatCollector {
                 .await
                 .map_err(ServiceError::RabbitMQ)?;
 
-            info!("Published chat message to queue");
+            info!("Published chat message to queue from {} in {} chat", chat_message.username, streamer);
         }
 
         Ok(())
@@ -382,6 +383,13 @@ impl ChatCollector {
     }
 }
 
+async fn health_check() -> HttpResponse {
+    HttpResponse::Ok().json(json!({
+        "status": "healthy",
+        "timestamp": chrono::Utc::now()
+    }))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -439,5 +447,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     info!("Service shutdown complete");
+
+    // Add health check server
+    let health_server = HttpServer::new(|| {
+        App::new().route("/health", web::get().to(health_check))
+    })
+    .bind("0.0.0.0:8080")?
+    .run();
+
+    // Run both the main service and health check server
+    tokio::select! {
+        _ = health_server => {},
+        result = async {
+            service.write().await.run().await
+        } => {
+            if let Err(e) = result {
+                error!("Service error: {:?}", e);
+            }
+        }
+    }
+
     Ok(())
 }

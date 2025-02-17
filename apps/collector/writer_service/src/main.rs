@@ -9,6 +9,8 @@ use migration::{Migrator, MigratorTrait};
 use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
 use serde_json::from_slice;
 use tracing::{error, info};
+use actix_web::{web, App, HttpResponse, HttpServer};
+use serde_json::json;
 
 #[derive(Clone)]
 struct WriterService {
@@ -136,11 +138,35 @@ impl WriterService {
     }
 }
 
+async fn health_check() -> HttpResponse {
+    HttpResponse::Ok().json(json!({
+        "status": "healthy",
+        "timestamp": Utc::now()
+    }))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), ServiceError> {
     // Initialize logging
     tracing_subscriber::fmt::init();
 
     let service = WriterService::new().await?;
-    service.start().await
+    let health_server = HttpServer::new(|| {
+        App::new().route("/health", web::get().to(health_check))
+    })
+    .bind("0.0.0.0:8080")
+    .unwrap()
+    .run();
+
+    // Run both the main service and health check server
+    tokio::select! {
+        _ = health_server => {},
+        result = service.start() => {
+            if let Err(e) = result {
+                error!("Service error: {:?}", e);
+            }
+        }
+    }
+
+    Ok(())
 }
