@@ -348,6 +348,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
+    // Print APP_PARTITION value
+    if let Ok(partition) = std::env::var("APP_PARTITION") {
+        info!("APP_PARTITION value: {}", partition);
+    } else {
+        info!("APP_PARTITION environment variable not set");
+    }
+
     let settings = ServiceConfig::new().expect("Failed to load configuration");
 
     tracing_info!("Initializing monitor service");
@@ -368,6 +375,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "rainman-fps".to_string(),
         "ahmedsabiri".to_string(),
         "chaos333gg".to_string(),
+        "boushaq".to_string(),
     ];
 
     // Create and run service
