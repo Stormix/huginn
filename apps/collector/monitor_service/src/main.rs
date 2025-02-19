@@ -350,9 +350,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Print APP_PARTITION value
     if let Ok(partition) = std::env::var("APP_PARTITION") {
-        info!("APP_PARTITION value: {}", partition);
+        tracing_info!("APP_PARTITION value: {}", partition);
     } else {
-        info!("APP_PARTITION environment variable not set");
+        tracing_info!("APP_PARTITION environment variable not set");
     }
 
     let settings = ServiceConfig::new().expect("Failed to load configuration");
