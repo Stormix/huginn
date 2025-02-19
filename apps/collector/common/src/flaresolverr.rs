@@ -2,7 +2,7 @@ use crate::ServiceError;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-
+use tracing::info;
 #[derive(Serialize)]
 struct FlareSolverrRequest {
     cmd: String,
@@ -48,6 +48,8 @@ impl FlareSolverrClient {
             max_timeout: 60000,
         };
 
+        info!("Sending FlareSolverr (at {}) request to {}", self.base_url, url);
+
         let status = self
             .client
             .post(&self.base_url)
@@ -56,6 +58,7 @@ impl FlareSolverrClient {
             .send()
             .await
             .map_err(|e| {
+                tracing::error!("FlareSolverr request failed: {}", e);
                 ServiceError::ApiProxyError(format!("FlareSolverr request failed: {}", e))
             })?;
 
