@@ -18,6 +18,8 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{error, info};
 use actix_web::{web, App, HttpResponse, HttpServer};
 use serde_json::json;
+use chrono::Utc;
+
 struct ChatCollector {
     partition_config: PartitionConfig,
     rabbit_consumer: Consumer,
@@ -386,15 +388,14 @@ impl ChatCollector {
 async fn health_check() -> HttpResponse {
     HttpResponse::Ok().json(json!({
         "status": "healthy",
-        "timestamp": chrono::Utc::now()
+        "timestamp": Utc::now()
     }))
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing
+    // Initialize logging
     tracing_subscriber::fmt::init();
-
     // Load configuration
     let config = ServiceConfig::new().expect("Failed to load configuration");
 
@@ -404,51 +405,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create and run service
-    let service = ChatCollector::new(config, partition_config).await?;
-    let service = Arc::new(RwLock::new(service));
-    let shutdown_service = service.clone();
-
-    // Set up shutdown signal handlers for both SIGTERM and SIGINT
-    #[cfg(unix)]
-    let term = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
-        info!("Received SIGTERM signal");
-    };
-
-    #[cfg(not(unix))]
-    let term = std::future::pending::<()>();
-
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-        info!("Received Ctrl+C signal");
-    };
-
-    // Run until we receive a shutdown signal
-    tokio::select! {
-        _ = term => {},
-        _ = ctrl_c => {},
-        result = async {
-            service.write().await.run().await
-        } => {
-            if let Err(e) = result {
-                error!("Service error: {:?}", e);
-            }
-        }
-    }
-
-    // Perform graceful shutdown
-    if let Err(e) = shutdown_service.write().await.shutdown().await {
-        error!("Error during shutdown: {:?}", e);
-    }
-
-    info!("Service shutdown complete");
-
-    // Add health check server
+    let mut service = ChatCollector::new(config, partition_config).await?;
+    let service_handle = service.run();
+    
     let health_server = HttpServer::new(|| {
         App::new().route("/health", web::get().to(health_check))
     })
@@ -457,10 +416,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run both the main service and health check server
     tokio::select! {
-        _ = health_server => {},
-        result = async {
-            service.write().await.run().await
-        } => {
+        result = health_server => {
+            if let Err(e) = result {
+                error!("Health server error: {:?}", e);
+            }
+        }
+        result = service_handle => {
             if let Err(e) = result {
                 error!("Service error: {:?}", e);
             }

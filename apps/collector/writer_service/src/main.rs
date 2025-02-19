@@ -151,17 +151,21 @@ async fn main() -> Result<(), ServiceError> {
     tracing_subscriber::fmt::init();
 
     let service = WriterService::new().await?;
+    let service_handle = service.start();
     let health_server = HttpServer::new(|| {
         App::new().route("/health", web::get().to(health_check))
     })
-    .bind("0.0.0.0:8080")
-    .unwrap()
+    .bind("0.0.0.0:8080")?
     .run();
 
     // Run both the main service and health check server
     tokio::select! {
-        _ = health_server => {},
-        result = service.start() => {
+        result = health_server => {
+            if let Err(e) = result {
+                error!("Health server error: {:?}", e);
+            }
+        }
+        result = service_handle => {
             if let Err(e) = result {
                 error!("Service error: {:?}", e);
             }

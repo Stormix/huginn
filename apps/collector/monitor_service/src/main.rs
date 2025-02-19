@@ -19,6 +19,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error as tracing_error, info as tracing_info, warn as tracing_warn};
 use actix_web::{web, App, HttpResponse, HttpServer};
+use serde_json::json;
 
 /// Main service structure
 struct MonitorService {
@@ -348,27 +349,19 @@ impl MonitorService {
     }
 }
 
+async fn health_check() -> HttpResponse {
+    HttpResponse::Ok().json(json!({
+        "status": "healthy",
+        "timestamp": Utc::now()
+    }))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
-    // Print APP_PARTITION value
-    if let Ok(partition) = std::env::var("APP_PARTITION") {
-        tracing_info!("APP_PARTITION value: {}", partition);
-    } else {
-        tracing_info!("APP_PARTITION environment variable not set");
-    }
-
     let settings = ServiceConfig::new().expect("Failed to load configuration");
-
-    tracing_info!("Initializing monitor service");
-    tracing_info!(
-        "Partition configuration: id={}, total={}",
-        settings.partition_id,
-        settings.total_partitions
-    );
-
     let partition_config = PartitionConfig {
         total_partitions: settings.total_partitions,
         partition_id: settings.partition_id,
@@ -385,46 +378,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create and run service
     let service = MonitorService::new(settings, partition_config, streamers).await?;
-    let service = Arc::new(service);
+    let service = Arc::new(tokio::sync::RwLock::new(service));
+    let service_clone = service.clone();
 
-    // Set up shutdown signal handlers for both SIGTERM and SIGINT
-    let shutdown_service = service.clone();
+    let health_server = HttpServer::new(|| {
+        App::new().route("/health", web::get().to(health_check))
+    })
+    .bind("0.0.0.0:8080")?
+    .run();
 
-    #[cfg(unix)]
-    let term = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
-        tracing_info!("Received SIGTERM signal");
-    };
-
-    #[cfg(not(unix))]
-    let term = std::future::pending::<()>();
-
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-        tracing_info!("Received Ctrl+C signal");
-    };
-
-    // Run until we receive a shutdown signal
+    // Run both the main service and health check server
     tokio::select! {
-        _ = term => {},
-        _ = ctrl_c => {},
-        result = service.run() => {
+        result = health_server => {
+            if let Err(e) = result {
+                tracing_error!("Health server error: {:?}", e);
+            }
+        }
+        result = async {
+            service.write().await.run().await
+        } => {
             if let Err(e) = result {
                 tracing_error!("Service error: {:?}", e);
             }
         }
+        _ = async {
+            tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
+            if let Err(e) = service_clone.write().await.shutdown().await {
+                tracing_error!("Error during shutdown: {:?}", e);
+            }
+        } => {}
     }
 
-    // Perform graceful shutdown
-    if let Err(e) = shutdown_service.shutdown().await {
-        tracing_error!("Error during shutdown: {:?}", e);
-    }
-
-    tracing_info!("Service shutdown complete");
     Ok(())
 }

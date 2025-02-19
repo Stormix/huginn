@@ -133,6 +133,8 @@ pub enum ServiceError {
 
     #[error("Parse error: {0}")]
     ParseError(String),
+    #[error("IO error: {0}")]
+    IO(#[from] std::io::Error),
 }
 
 /// Redis keys and prefixes
