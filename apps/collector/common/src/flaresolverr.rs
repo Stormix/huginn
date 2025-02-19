@@ -61,7 +61,7 @@ impl FlareSolverrClient {
 
         let status = self
             .client
-            .post(&self.base_url)
+            .post(&format!("{}/v1", self.base_url))
             .header("Content-Type", "application/json")
             .json(&payload)
             .send()
@@ -109,7 +109,13 @@ impl FlareSolverrClient {
             .await
             .map_err(|e| ServiceError::ApiProxyError(format!("Health check failed: {}", e)))?;
 
-        let health_data = response.json::<HealthResponse>().await.map_err(|e| {
+        let response_text = response.text().await.map_err(|e| {
+            ServiceError::ApiProxyError(format!("Failed to get response text: {}", e))
+        })?;
+
+        info!("FlareSolverr health check response: {}", response_text);
+
+        let health_data = serde_json::from_str::<HealthResponse>(&response_text).map_err(|e| {
             ServiceError::ApiProxyError(format!("Failed to parse health check response: {}", e))
         })?;
 
