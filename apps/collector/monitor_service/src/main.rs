@@ -42,6 +42,14 @@ impl MonitorService {
     ) -> Result<Self, ServiceError> {
         tracing_info!("Initializing monitor service");
 
+        // Initialize FlareSolverr client first and check health
+        let flaresolverr_client = FlareSolverrClient::new(config.flaresolverr_url)
+            .map_err(|e| ServiceError::ApiProxyError(e.to_string()))?;
+
+        tracing_info!("Checking FlareSolverr health...");
+        flaresolverr_client.health_check().await?;
+        tracing_info!("FlareSolverr is healthy");
+
         // Initialize RabbitMQ connection
         let conn =
             Connection::connect(&config.rabbitmq_url, ConnectionProperties::default()).await?;
@@ -66,9 +74,6 @@ impl MonitorService {
             Duration::from_secs(1),  // base delay
             Duration::from_secs(30), // max delay
         );
-
-        let flaresolverr_client = FlareSolverrClient::new(config.flaresolverr_url)
-            .map_err(|e| ServiceError::ApiProxyError(e.to_string()))?;
 
         Ok(Self {
             partition_config,

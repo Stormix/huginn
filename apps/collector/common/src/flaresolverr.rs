@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::info;
+
 #[derive(Serialize)]
 struct FlareSolverrRequest {
     cmd: String,
@@ -24,6 +25,14 @@ struct FlareSolverrSolution {
     url: String,
     status: u32,
     response: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct HealthResponse {
+    msg: String,
+    version: String,
+    #[serde(rename = "userAgent")]
+    user_agent: String,
 }
 
 pub struct FlareSolverrClient {
@@ -90,5 +99,26 @@ impl FlareSolverrClient {
         })?;
 
         Ok(html_response[json_start..=json_end].to_string())
+    }
+
+    pub async fn health_check(&self) -> Result<(), ServiceError> {
+        let response = self
+            .client
+            .get(&self.base_url)
+            .send()
+            .await
+            .map_err(|e| ServiceError::ApiProxyError(format!("Health check failed: {}", e)))?;
+
+        let health_data = response.json::<HealthResponse>().await.map_err(|e| {
+            ServiceError::ApiProxyError(format!("Failed to parse health check response: {}", e))
+        })?;
+
+        if health_data.msg != "FlareSolverr is ready!" {
+            return Err(ServiceError::ApiProxyError(
+                "FlareSolverr reported not ready".to_string(),
+            ));
+        }
+
+        Ok(())
     }
 }
