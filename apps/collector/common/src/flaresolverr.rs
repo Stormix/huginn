@@ -54,7 +54,7 @@ impl FlareSolverrClient {
         let payload = FlareSolverrRequest {
             cmd: "request.get".to_string(),
             url: url.to_string(),
-            max_timeout: 60000,
+            max_timeout: 5000,
         };
 
         info!("Sending FlareSolverr (at {}) request to {}", self.base_url, url);
