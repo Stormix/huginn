@@ -150,6 +150,13 @@ async fn main() -> Result<(), ServiceError> {
     // Initialize logging
     tracing_subscriber::fmt::init();
 
+    // Log APP_PARTITION environment variable
+    if let Ok(partition) = std::env::var("APP_PARTITION") {
+        info!("Starting service with APP_PARTITION: {}", partition);
+    } else {
+        info!("APP_PARTITION environment variable not set");
+    }
+
     let service = WriterService::new().await?;
     let service_handle = service.start();
     let health_server = HttpServer::new(|| {
