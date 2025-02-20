@@ -88,6 +88,7 @@ services:
       - APP_HEARTBEAT_INTERVAL=10
       - APP_RECOVERY_ATTEMPTS=3
       - APP_FLARESOLVERR_URL=http://localhost:49767
+      - APP_FLARESOLVERR_MAX_TIMEOUT=5000
     volumes:
       - .:/usr/src/app
       - target:/usr/src/app/target
@@ -153,6 +154,7 @@ services:
       - APP_HEARTBEAT_INTERVAL=10
       - APP_RECOVERY_ATTEMPTS=3
       - APP_FLARESOLVERR_URL=http://localhost:49767
+      - APP_FLARESOLVERR_MAX_TIMEOUT=5000
     volumes:
       - .:/usr/src/app
       - target:/usr/src/app/target
@@ -201,6 +203,7 @@ services:
       - APP_HEARTBEAT_INTERVAL=10
       - APP_RECOVERY_ATTEMPTS=3
       - APP_FLARESOLVERR_URL=http://localhost:49767
+      - APP_FLARESOLVERR_MAX_TIMEOUT=5000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s

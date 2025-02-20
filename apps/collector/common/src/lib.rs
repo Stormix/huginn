@@ -278,6 +278,7 @@ pub mod config {
         pub recovery_attempts: u32,
         pub total_partitions: u32,
         pub flaresolverr_url: String,
+        pub flaresolverr_max_timeout: u32,
         pub partition: String,
     }
 

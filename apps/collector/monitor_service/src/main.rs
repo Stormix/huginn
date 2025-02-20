@@ -44,7 +44,7 @@ impl MonitorService {
         tracing_info!("Initializing monitor service");
 
         // Initialize FlareSolverr client first and check health
-        let flaresolverr_client = FlareSolverrClient::new(config.flaresolverr_url)
+        let flaresolverr_client = FlareSolverrClient::new(config.flaresolverr_url, config.flaresolverr_max_timeout)
             .map_err(|e| ServiceError::ApiProxyError(e.to_string()))?;
 
         tracing_info!("Checking FlareSolverr health...");

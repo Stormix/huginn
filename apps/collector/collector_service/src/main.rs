@@ -127,7 +127,7 @@ impl ChatCollector {
         info!("Connecting to Redis...");
         let redis_client = redis::Client::open(config.redis_url)?;
 
-        let flaresolverr_client = FlareSolverrClient::new(config.flaresolverr_url)
+        let flaresolverr_client = FlareSolverrClient::new(config.flaresolverr_url, config.flaresolverr_max_timeout)
             .map_err(|e| ServiceError::ApiProxyError(e.to_string()))?;
 
         let recovery_manager = RecoveryManager::new(

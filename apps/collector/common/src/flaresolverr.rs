@@ -38,23 +38,24 @@ struct HealthResponse {
 pub struct FlareSolverrClient {
     client: Client,
     base_url: String,
+    max_timeout: u32,
 }
 
 impl FlareSolverrClient {
-    pub fn new(base_url: String) -> Result<Self, ServiceError> {
+    pub fn new(base_url: String, max_timeout: u32) -> Result<Self, ServiceError> {
         let client = Client::builder()
             .timeout(Duration::from_secs(60))
             .build()
             .map_err(|e| ServiceError::ApiProxyError(e.to_string()))?;
 
-        Ok(Self { client, base_url })
+        Ok(Self { client, base_url, max_timeout })
     }
 
     pub async fn get(&self, url: &str) -> Result<String, ServiceError> {
         let payload = FlareSolverrRequest {
             cmd: "request.get".to_string(),
             url: url.to_string(),
-            max_timeout: 5000,
+            max_timeout: self.max_timeout,
         };
 
         info!("Sending FlareSolverr (at {}) request to {}", self.base_url, url);
