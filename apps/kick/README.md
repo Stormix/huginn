@@ -1,5 +1,7 @@
 # @huginn/kick
 
+## Usage
+
 To install dependencies:
 
 ```bash
