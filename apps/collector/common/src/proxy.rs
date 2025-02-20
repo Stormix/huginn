@@ -2,7 +2,7 @@ use crate::error::MonitorError;
 use rand::seq::SliceRandom;
 use reqwest::{Client, Proxy};
 use std::env;
-use tracing::warn;
+use tracing::{info, warn};
 
 #[derive(Clone, Debug)]
 pub struct ProxyConfig {
@@ -65,20 +65,24 @@ impl ProxyManager {
         Ok(proxies)
     }
 
+    async fn create_client_with_proxy(&self, proxy: &ProxyConfig) -> Result<Client, MonitorError> {
+        let proxy_url = proxy.to_url();
+        let proxy = Proxy::http(&proxy_url)
+            .map_err(|e| MonitorError::ApiError(format!("Failed to create proxy: {}", e)))?;
+
+        Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .proxy(proxy)
+            .build()
+            .map_err(|e| MonitorError::ApiError(format!("Failed to create client: {}", e)))
+    }
+
     async fn make_request_with_proxy(
         &self,
         url: &str,
         proxy: &ProxyConfig,
     ) -> Result<String, MonitorError> {
-        let proxy_url = proxy.to_url();
-        let proxy = Proxy::http(&proxy_url)
-            .map_err(|e| MonitorError::ApiError(format!("Failed to create proxy: {}", e)))?;
-
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .proxy(proxy)
-            .build()
-            .map_err(|e| MonitorError::ApiError(format!("Failed to create HTTP client: {}", e)))?;
+        let client = self.create_client_with_proxy(proxy).await?;
 
         let response = client
             .get(url)
@@ -108,6 +112,7 @@ impl ProxyManager {
 
         let mut last_error = None;
         for proxy in proxies {
+            info!("Trying proxy {}:{}", proxy.host, proxy.port);
             match self.make_request_with_proxy(url, &proxy).await {
                 Ok(response_body) => return Ok(response_body),
                 Err(e) => {
