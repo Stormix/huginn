@@ -215,7 +215,13 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-
+  kick:
+    build:
+      context: .
+      dockerfile: ./apps/kick/Dockerfile
+    ports:
+      - "3000:3000"
+      
 volumes:
   rabbitmq_data:
   postgres_data:
