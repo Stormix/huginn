@@ -53,23 +53,9 @@ jobs:
         with:
           ssh-key: ${{ secrets.SSH_KEY }}
 
-      - name: Cache pnpm modules
-        uses: actions/cache@v3
-        with:
-          path: ~/.pnpm-store
-          key: ${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-
-
-      - uses: pnpm/action-setup@v4
-        name: Setup pnpm
-        with:
-          version: 9
-          run_install: false
-
       - name: Read version from package.json
         id: get_version
-        working-directory: ./apps/collector
+        working-directory: ./
         run: |
           VERSION=$(jq -r '.version' package.json)
           echo "Current version: $VERSION"
