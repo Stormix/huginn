@@ -26,7 +26,7 @@ export class KickService {
     return page;
   }
 
-  async checkStreamer(streamer: string): Promise<CheckStreamerResponse> {
+  async checkStreamerOld(streamer: string): Promise<CheckStreamerResponse> {
     // const response = await this.httpClient.get(`/check/${streamer}`);
     const page = await this.init();
 
@@ -61,6 +61,24 @@ export class KickService {
       isLive: data.livestream.is_live,
       viewers: data.livestream.viewer_count,
       title: data.livestream.session_title,
+    };
+  }
+
+  async checkStreamer(streamer: string): Promise<CheckStreamerResponse> {
+    const response = new Promise((resolve, reject) => {
+      fetch(`https://kick.com/api/v2/channels/${streamer}`)
+        .then((res) => res.json())
+        .then((data) => resolve(data))
+        .catch(reject);
+    });
+
+    const data = (await response) as { livestream: { is_live: boolean; viewer_count: number; session_title: string } };
+
+    return {
+      success: true,
+      isLive: data['livestream']['is_live'],
+      viewers: data['livestream']['viewer_count'],
+      title: data['livestream']['session_title'],
     };
   }
 }
