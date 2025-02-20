@@ -399,9 +399,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration
     let config = ServiceConfig::new().expect("Failed to load configuration");
 
+    let partition_id = config.partition.to_string()
+        .split('-')
+        .last()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+
+    info!("Starting collector service with partition ID: {}", partition_id);
+
     let partition_config = PartitionConfig {
         total_partitions: config.total_partitions,
-        partition_id: config.partition_id,
+        partition_id,
     };
 
     // Create and run service

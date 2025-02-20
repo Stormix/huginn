@@ -277,8 +277,8 @@ pub mod config {
         pub heartbeat_interval: u64,
         pub recovery_attempts: u32,
         pub total_partitions: u32,
-        pub partition_id: u32,
         pub flaresolverr_url: String,
+        pub partition: String,
     }
 
     impl ServiceConfig {

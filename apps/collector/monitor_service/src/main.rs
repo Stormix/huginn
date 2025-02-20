@@ -362,10 +362,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let settings = ServiceConfig::new().expect("Failed to load configuration");
+
+    // Extract partition ID from pod name (e.g., "huginn-collector-service-2" -> 2)
+    let partition_id = settings.partition
+        .split('-')
+        .last()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+
+    tracing_info!("Starting monitor service with partition ID: {}", partition_id);
+
     let partition_config = PartitionConfig {
         total_partitions: settings.total_partitions,
-        partition_id: settings.partition_id,
+        partition_id,
     };
+
 
     let streamers = vec![
         "ilyaselmaliki".to_string(),
