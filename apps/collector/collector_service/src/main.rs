@@ -1,7 +1,10 @@
 mod kick;
 
+use actix_web::{App, HttpResponse, HttpServer, web};
+use chrono::Utc;
 use common::config::ServiceConfig;
 use common::flaresolverr::FlareSolverrClient;
+use common::proxy::ProxyManager;
 use common::recovery::RecoveryManager;
 use common::{
     ChatMessage, ChatMessageMetadata, PartitionConfig, RabbitMQConfig, ServiceError, ServiceStatus,
@@ -11,14 +14,12 @@ use futures::{SinkExt, StreamExt};
 use lapin::{
     BasicProperties, Connection, ConnectionProperties, Consumer, options::*, types::FieldTable,
 };
+use serde_json::json;
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{RwLock, mpsc};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{error, info};
-use actix_web::{web, App, HttpResponse, HttpServer};
-use serde_json::json;
-use chrono::Utc;
 
 struct ChatCollector {
     partition_config: PartitionConfig,
@@ -26,7 +27,7 @@ struct ChatCollector {
     redis_client: redis::Client,
     active_connections: Arc<RwLock<HashMap<String, WebSocketConnection>>>,
     service_status: Arc<RwLock<ServiceStatus>>,
-    flaresolverr_client: FlareSolverrClient,
+    proxy_manager: ProxyManager,
     recovery_manager: RecoveryManager,
     rabbit_channel: lapin::Channel,
 }
@@ -127,8 +128,9 @@ impl ChatCollector {
         info!("Connecting to Redis...");
         let redis_client = redis::Client::open(config.redis_url)?;
 
-        let flaresolverr_client = FlareSolverrClient::new(config.flaresolverr_url, config.flaresolverr_max_timeout)
-            .map_err(|e| ServiceError::ApiProxyError(e.to_string()))?;
+        let proxy_manager =
+            ProxyManager::new().map_err(|e| ServiceError::ProxyError(e.to_string()))?;
+        info!("Proxy manager initialized");
 
         let recovery_manager = RecoveryManager::new(
             3,                       // max attempts
@@ -144,7 +146,7 @@ impl ChatCollector {
             redis_client,
             active_connections: Arc::new(RwLock::new(HashMap::new())),
             service_status: Arc::new(RwLock::new(ServiceStatus::Starting)),
-            flaresolverr_client,
+            proxy_manager,
             recovery_manager,
             rabbit_channel: channel,
         })
@@ -154,15 +156,22 @@ impl ChatCollector {
         self.recovery_manager
             .execute(|| async {
                 let url = format!("https://kick.com/api/v2/channels/{}", streamer);
-                let response = self.flaresolverr_client.get(&url).await?;
+                let response = self
+                    .proxy_manager
+                    .make_request(&url)
+                    .await
+                    .map_err(|e| ServiceError::ApiError(e.to_string()))?;
+
                 let json: serde_json::Value = serde_json::from_str(&response)
                     .map_err(|e| ServiceError::ParseError(e.to_string()))?;
+
                 let chatroom_id =
                     json["chatroom"]["id"]
                         .as_u64()
                         .ok_or(ServiceError::ParseError(
                             "Chatroom ID not found".to_string(),
                         ))?;
+
                 Ok(chatroom_id.to_string())
             })
             .await
@@ -292,7 +301,10 @@ impl ChatCollector {
                 .await
                 .map_err(ServiceError::RabbitMQ)?;
 
-            info!("Published chat message to queue from {} in {} chat", chat_message.username, streamer);
+            info!(
+                "Published chat message to queue from {} in {} chat",
+                chat_message.username, streamer
+            );
         }
 
         Ok(())
@@ -399,13 +411,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration
     let config = ServiceConfig::new().expect("Failed to load configuration");
 
-    let partition_id = config.partition.to_string()
+    let partition_id = config
+        .partition
+        .to_string()
         .split('-')
         .last()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(0);
 
-    info!("Starting collector service with partition ID: {}", partition_id);
+    info!(
+        "Starting collector service with partition ID: {}",
+        partition_id
+    );
 
     let partition_config = PartitionConfig {
         total_partitions: config.total_partitions,
@@ -415,12 +432,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create and run service
     let mut service = ChatCollector::new(config, partition_config).await?;
     let service_handle = service.run();
-    
-    let health_server = HttpServer::new(|| {
-        App::new().route("/health", web::get().to(health_check))
-    })
-    .bind("0.0.0.0:8080")?
-    .run();
+
+    let health_server =
+        HttpServer::new(|| App::new().route("/health", web::get().to(health_check)))
+            .bind("0.0.0.0:8080")?
+            .run();
 
     // Run both the main service and health check server
     tokio::select! {

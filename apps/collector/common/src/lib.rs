@@ -1,5 +1,6 @@
 pub mod error;
 pub mod flaresolverr;
+pub mod proxy;
 pub mod recovery;
 
 use chrono::{DateTime, Utc};
@@ -133,8 +134,15 @@ pub enum ServiceError {
 
     #[error("Parse error: {0}")]
     ParseError(String),
+
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
+
+    #[error("Proxy error: {0}")]
+    ProxyError(String),
+
+    #[error("Configuration error: {0}")]
+    Configuration(String),
 }
 
 /// Redis keys and prefixes

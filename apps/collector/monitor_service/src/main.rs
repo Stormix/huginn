@@ -1,25 +1,24 @@
 use common::error::MonitorError;
-use common::flaresolverr::FlareSolverrClient;
+use common::proxy::ProxyManager;
 use common::recovery::RecoveryManager;
-
 use common::{
     AlertType, HealthStatus, PartitionConfig, Partitionable, RabbitMQConfig, RecoveryState,
     RedisKeys, ServiceError, ServiceStatus, StreamerStatus, SystemAlert,
 };
 
+use actix_web::{App, HttpResponse, HttpServer, web};
 use chrono::Utc;
 use common::config::ServiceConfig;
 use lapin::{
     BasicProperties, Channel, Connection, ConnectionProperties, options::*, types::FieldTable,
 };
 use redis::Client as RedisClient;
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error as tracing_error, info as tracing_info, warn as tracing_warn};
-use actix_web::{web, App, HttpResponse, HttpServer};
-use serde_json::json;
 
 /// Main service structure
 struct MonitorService {
@@ -32,7 +31,7 @@ struct MonitorService {
     service_status: Arc<tokio::sync::RwLock<ServiceStatus>>,
     recovery_manager: RecoveryManager,
     error_counter: Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
-    flaresolverr_client: FlareSolverrClient,
+    proxy_manager: ProxyManager,
 }
 
 impl MonitorService {
@@ -43,18 +42,14 @@ impl MonitorService {
     ) -> Result<Self, ServiceError> {
         tracing_info!("Initializing monitor service");
 
-        // Initialize FlareSolverr client first and check health
-        let flaresolverr_client = FlareSolverrClient::new(config.flaresolverr_url, config.flaresolverr_max_timeout)
-            .map_err(|e| ServiceError::ApiProxyError(e.to_string()))?;
-
-        tracing_info!("Checking FlareSolverr health...");
-        flaresolverr_client.health_check().await?;
-        tracing_info!("FlareSolverr is healthy");
+        // Initialize proxy manager
+        let proxy_manager =
+            ProxyManager::new().map_err(|e| ServiceError::ProxyError(e.to_string()))?;
+        tracing_info!("Proxy manager initialized");
 
         // Initialize RabbitMQ connection
         let conn =
             Connection::connect(&config.rabbitmq_url, ConnectionProperties::default()).await?;
-
         let channel = conn.create_channel().await?;
 
         // Declare exchanges and queues
@@ -86,7 +81,34 @@ impl MonitorService {
             service_status: Arc::new(tokio::sync::RwLock::new(ServiceStatus::Starting)),
             recovery_manager,
             error_counter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            flaresolverr_client,
+            proxy_manager,
+        })
+    }
+
+    /// Check streamer status
+    async fn make_api_call(&self, username: &str) -> Result<StreamerStatus, MonitorError> {
+        let url = format!("https://kick.com/api/v2/channels/{}", username);
+
+        // Make request using proxy manager
+        let response_body = self.proxy_manager.make_request(&url).await?;
+
+        // Parse the response
+        let data = serde_json::from_str::<serde_json::Value>(&response_body)
+            .map_err(|e| MonitorError::ApiError(format!("Failed to parse JSON: {}", e)))?;
+
+        // Extract relevant fields from the response
+        Ok(StreamerStatus {
+            username: username.to_string(),
+            is_live: data["livestream"].is_object()
+                && data["livestream"]["is_live"].as_bool().unwrap_or(false),
+            timestamp: Utc::now(),
+            viewers: data["livestream"]["viewer_count"]
+                .as_u64()
+                .map(|v| v as i32),
+            stream_id: data["livestream"]["id"].as_u64().map(|id| id.to_string()),
+            title: data["livestream"]["session_title"]
+                .as_str()
+                .map(|s| s.to_string()),
         })
     }
 
@@ -121,49 +143,6 @@ impl MonitorService {
             .await?;
 
         Ok(())
-    }
-
-    /// Check streamer status
-    async fn make_api_call(&self, username: &str) -> Result<StreamerStatus, MonitorError> {
-        let url = format!("https://kick.com/api/v2/channels/{}", username);
-
-        // Use FlareSolverr client to make the request
-        let response_body = self.flaresolverr_client.get(&url).await?;
-
-        // Parse the response
-        let data = serde_json::from_str::<serde_json::Value>(&response_body)
-            .map_err(|e| MonitorError::ApiError(format!("Failed to parse JSON: {}", e)))?;
-
-        // Extract relevant fields from the response
-        let status = StreamerStatus {
-            username: username.to_string(),
-            is_live: data["livestream"].is_object()
-                && data["livestream"]["is_live"].as_bool().unwrap_or(false),
-            timestamp: Utc::now(),
-            viewers: data["livestream"]["viewer_count"]
-                .as_u64()
-                .map(|v| v as i32),
-            stream_id: data["livestream"]["id"].as_u64().map(|id| id.to_string()),
-            title: data["livestream"]["session_title"]
-                .as_str()
-                .map(|s| s.to_string()),
-        };
-
-        // Publish status to RabbitMQ if streamer is live
-        if status.is_live {
-            self.rabbit_channel
-                .basic_publish(
-                    RabbitMQConfig::STREAMER_STATUS_EXCHANGE,
-                    &format!("streamer.status.{}", username),
-                    BasicPublishOptions::default(),
-                    &serde_json::to_vec(&status).map_err(ServiceError::Serialization)?,
-                    BasicProperties::default(),
-                )
-                .await
-                .map_err(ServiceError::RabbitMQ)?;
-        }
-
-        Ok(status)
     }
 
     async fn check_streamer(&self, username: &str) -> Result<StreamerStatus, MonitorError> {
@@ -364,19 +343,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = ServiceConfig::new().expect("Failed to load configuration");
 
     // Extract partition ID from pod name (e.g., "huginn-collector-service-2" -> 2)
-    let partition_id = settings.partition
+    let partition_id = settings
+        .partition
         .split('-')
         .last()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(0);
 
-    tracing_info!("Starting monitor service with partition ID: {}", partition_id);
+    tracing_info!(
+        "Starting monitor service with partition ID: {}",
+        partition_id
+    );
 
     let partition_config = PartitionConfig {
         total_partitions: settings.total_partitions,
         partition_id,
     };
-
 
     let streamers = vec![
         "ilyaselmaliki".to_string(),
@@ -392,11 +374,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service = Arc::new(tokio::sync::RwLock::new(service));
     let service_clone = service.clone();
 
-    let health_server = HttpServer::new(|| {
-        App::new().route("/health", web::get().to(health_check))
-    })
-    .bind("0.0.0.0:8080")?
-    .run();
+    let health_server =
+        HttpServer::new(|| App::new().route("/health", web::get().to(health_check)))
+            .bind("0.0.0.0:8080")?
+            .run();
 
     // Run both the main service and health check server
     tokio::select! {

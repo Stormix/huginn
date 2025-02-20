@@ -25,4 +25,7 @@ pub enum MonitorError {
 
     #[error("Serialization error: {0}")]
     SerializationError(String),
+
+    #[error("Configuration error: {0}")]
+    Configuration(String),
 }
