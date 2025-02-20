@@ -45,7 +45,25 @@ impl MonitorService {
         // Initialize proxy manager
         let proxy_manager =
             ProxyManager::new().map_err(|e| ServiceError::ProxyError(e.to_string()))?;
-        tracing_info!("Proxy manager initialized");
+
+        // Test proxy connection
+        tracing_info!("Testing proxy connection...");
+        let ip_test_url = "https://api.ipify.org?format=json";
+
+        match proxy_manager.make_request(ip_test_url).await {
+            Ok(response) => {
+                let ip_data: serde_json::Value = serde_json::from_str(&response).map_err(|e| {
+                    ServiceError::ProxyError(format!("Failed to parse IP test response: {}", e))
+                })?;
+                tracing_info!("Proxy test successful - using IP: {}", ip_data["ip"]);
+            }
+            Err(e) => {
+                return Err(ServiceError::ProxyError(format!(
+                    "Proxy test failed: {}",
+                    e
+                )));
+            }
+        }
 
         // Initialize RabbitMQ connection
         let conn =
