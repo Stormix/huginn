@@ -18,10 +18,13 @@
   "dependencies": {
     "@huginn/eslint-config": "workspace:*",
     "@huginn/typescript-config": "workspace:*",
+    "axios": "^1.7.9",
     "hono": "^4.7.2",
+    "https-proxy-agent": "^7.0.6",
     "puppeteer": "^24.2.1",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "puppeteer-real-browser": "^1.4.1"
+    "puppeteer-real-browser": "^1.4.1",
+    "zod": "^3.24.2"
   }
 }

@@ -1,8 +1,6 @@
-import type { Browser } from 'puppeteer';
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-
-puppeteer.use(StealthPlugin());
+/* eslint-disable @typescript-eslint/no-require-imports */
+import { connect } from 'puppeteer-real-browser';
+import { proxyManager } from '../proxy';
 interface CheckStreamerResponse {
   success: boolean;
   isLive: boolean;
@@ -10,75 +8,137 @@ interface CheckStreamerResponse {
   title: string;
 }
 
+type PuppeteerBrowser = Awaited<ReturnType<typeof connect>>['browser'];
+
 export class KickService {
-  private browser: Browser | null = null;
-  constructor() {}
+  private browser: PuppeteerBrowser | null = null;
+  private requestCounter = 0;
+  private readonly MAX_REQUESTS_PER_BROWSER = 10; // Rotate browser after 10 requests
+  private readonly PROXY_MANAGER = proxyManager;
 
-  async init() {
-    if (!this.browser) {
-      this.browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox'],
-      });
-    }
-
-    const page = await this.browser.newPage();
-    return page;
+  constructor() {
+    // Initialize by checking and removing any failed proxies
+    this.PROXY_MANAGER.removeFailedProxies().catch((error) => {
+      console.error('Failed to initialize proxy checker:', error);
+    });
   }
 
-  async checkStreamerOld(streamer: string): Promise<CheckStreamerResponse> {
-    // const response = await this.httpClient.get(`/check/${streamer}`);
-    const page = await this.init();
+  private async closeBrowser() {
+    if (this.browser) {
+      try {
+        await this.browser.close();
+      } catch (error) {
+        console.warn('Error closing browser:', error);
+      }
+      this.browser = null;
+    }
+  }
 
-    const response = await page.goto(`https://kick.com/api/v2/channels/${streamer}`, {
-      waitUntil: 'networkidle2',
+  async init() {
+    // Close existing browser if we have one
+    await this.closeBrowser();
+
+    // Get a proxy and verify it works
+    let proxy = this.PROXY_MANAGER.getProxy();
+    let proxyWorks = await this.PROXY_MANAGER.checkProxy(proxy);
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    // Try up to maxAttempts times to get a working proxy
+    while (!proxyWorks && attempts < maxAttempts) {
+      console.log(`Proxy ${proxy.host}:${proxy.port} failed check, trying another...`);
+      proxy = this.PROXY_MANAGER.getProxy((p) => p.host === proxy.host && p.port === proxy.port); // Remove failed proxy
+      proxyWorks = await this.PROXY_MANAGER.checkProxy(proxy);
+      attempts++;
+    }
+
+    if (!proxyWorks) {
+      throw new Error('Failed to find a working proxy after multiple attempts');
+    }
+
+    console.log(`Using verified proxy ${proxy.host}:${proxy.port}`);
+
+    const { browser } = await connect({
+      headless: true,
+      args: ['--no-sandbox'],
+      customConfig: {},
+      turnstile: true,
+      disableXvfb: false,
+      ignoreAllFlags: false,
+      proxy: {
+        host: proxy.host,
+        port: proxy.port,
+        username: proxy.username,
+        password: proxy.password,
+      },
+      plugins: [require('puppeteer-extra-plugin-stealth')()],
     });
 
-    if (!response) {
-      console.warn(`Failed to check streamer ${streamer}`);
-      return {
-        success: false,
-        isLive: false,
-        viewers: 0,
-        title: '',
-      };
-    }
+    this.browser = browser;
+    this.requestCounter = 0;
+    console.log('New browser instance created');
 
-    if (!response.ok) {
-      console.warn(`Failed to check streamer ${streamer}`);
-      return {
-        success: false,
-        isLive: false,
-        viewers: 0,
-        title: '',
-      };
-    }
-
-    const data = await response.json();
-
-    return {
-      success: true,
-      isLive: data.livestream.is_live,
-      viewers: data.livestream.viewer_count,
-      title: data.livestream.session_title,
-    };
+    return this.browser;
   }
 
   async checkStreamer(streamer: string): Promise<CheckStreamerResponse> {
-    const response = new Promise((resolve, reject) => {
-      fetch(`https://kick.com/api/v2/channels/${streamer}`)
-        .then((res) => res.json())
-        .then((data) => resolve(data))
-        .catch(reject);
-    });
+    // Initialize browser if not exists or if we've hit the request limit
+    if (!this.browser || this.requestCounter >= this.MAX_REQUESTS_PER_BROWSER) {
+      console.log(`Rotating browser after ${this.requestCounter} requests`);
+      await this.init();
+    }
 
-    const data = (await response) as { livestream: { is_live: boolean; viewer_count: number; session_title: string } };
+    // Increment request counter
+    this.requestCounter++;
 
-    return {
-      success: true,
-      isLive: data['livestream']['is_live'],
-      viewers: data['livestream']['viewer_count'],
-      title: data['livestream']['session_title'],
-    };
+    // Create new page for this request
+    const page = await this.browser!.newPage();
+    try {
+      const response = await page.goto(`https://api.ipify.org/?format=json`, {
+        waitUntil: 'networkidle2',
+      });
+
+      if (!response || !response.ok()) {
+        console.warn(`Failed to check streamer ${streamer}, status: ${response?.status()}`);
+        return {
+          success: false,
+          isLive: false,
+          viewers: 0,
+          title: '',
+        };
+      }
+
+      const data = await response.json();
+      const text = await response.text();
+
+      console.info('Reponse: ', text.substring(0, 100));
+
+      return {
+        success: true,
+        isLive: data.livestream?.is_live ?? false,
+        viewers: data.livestream?.viewer_count ?? 0,
+        title: data.livestream?.session_title ?? '',
+      };
+    } catch (error) {
+      console.error(`Error checking streamer ${streamer}:`, error);
+      return {
+        success: false,
+        isLive: false,
+        viewers: 0,
+        title: '',
+      };
+    } finally {
+      // Always close the page to free up resources
+      try {
+        await page.close();
+      } catch (error) {
+        console.warn('Error closing page:', error);
+      }
+    }
+  }
+
+  // Cleanup method to be called when shutting down
+  async cleanup() {
+    await this.closeBrowser();
   }
 }
