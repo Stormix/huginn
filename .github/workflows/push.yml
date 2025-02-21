@@ -66,7 +66,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_ENV
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
@@ -74,9 +74,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
       - name: Build and push monitor service
         if: needs.changes.outputs.monitor == 'true'
-        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./apps/collector/monitor_service/Dockerfile
@@ -89,26 +97,26 @@ jobs:
 
       - name: Build and push collector service
         if: needs.changes.outputs.collector == 'true'
-        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./apps/collector/collector_service/Dockerfile
           push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
+          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/huginn-collector:${{ env.version }}
             ${{ secrets.DOCKER_USERNAME }}/huginn-collector:latest
 
       - name: Build and push writer service
         if: needs.changes.outputs.writer == 'true'
-        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./apps/collector/writer_service/Dockerfile
           push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
+          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/huginn-writer:${{ env.version }}
             ${{ secrets.DOCKER_USERNAME }}/huginn-writer:latest
@@ -120,8 +128,16 @@ jobs:
           context: .
           file: ./apps/kick/Dockerfile
           push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
+          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/huginn-kick:${{ env.version }}
             ${{ secrets.DOCKER_USERNAME }}/huginn-kick:latest
+
+      - # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        name: Move cache
+        run: |
+          rm -rf ${{ runner.temp }}/.buildx-cache
+          mv ${{ runner.temp }}/.buildx-cache-new ${{ runner.temp }}/.buildx-cache
