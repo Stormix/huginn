@@ -13,6 +13,7 @@ use lapin::{
     BasicProperties, Channel, Connection, ConnectionProperties, options::*, types::FieldTable,
 };
 use redis::Client as RedisClient;
+use sea_orm::{Database, DatabaseConnection, EntityTrait};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,7 +26,7 @@ struct MonitorService {
     partition_config: PartitionConfig,
     rabbit_channel: Channel,
     redis_client: RedisClient,
-    streamers: Vec<String>,
+    db: DatabaseConnection,
     health_check_interval: Duration,
     heartbeat_interval: Duration,
     service_status: Arc<tokio::sync::RwLock<ServiceStatus>>,
@@ -38,7 +39,6 @@ impl MonitorService {
     async fn new(
         config: ServiceConfig,
         partition_config: PartitionConfig,
-        streamers: Vec<String>,
     ) -> Result<Self, ServiceError> {
         tracing_info!("Initializing monitor service");
 
@@ -64,6 +64,9 @@ impl MonitorService {
         // Initialize Redis client
         let redis_client = RedisClient::open(config.redis_url)?;
 
+        // Initialize database connection
+        let db = Database::connect(&config.database_url).await?;
+
         let recovery_manager = RecoveryManager::new(
             3,                       // max attempts
             Duration::from_secs(1),  // base delay
@@ -74,7 +77,7 @@ impl MonitorService {
             partition_config,
             rabbit_channel: channel,
             redis_client,
-            streamers,
+            db,
             health_check_interval: Duration::from_secs(config.health_check_interval),
             heartbeat_interval: Duration::from_secs(config.heartbeat_interval),
             service_status: Arc::new(tokio::sync::RwLock::new(ServiceStatus::Starting)),
@@ -82,6 +85,24 @@ impl MonitorService {
             error_counter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             kick_client,
         })
+    }
+
+    /// Get streamers assigned to this partition
+    async fn get_assigned_streamers(&self) -> Result<Vec<String>, ServiceError> {
+        let all_streamers = entity::streamer::Entity::find()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|s| s.username)
+            .collect::<Vec<String>>();
+
+        Ok(all_streamers
+            .into_iter()
+            .filter(|streamer| {
+                streamer.get_partition(self.partition_config.total_partitions)
+                    == self.partition_config.partition_id
+            })
+            .collect())
     }
 
     /// Check streamer status
@@ -98,24 +119,12 @@ impl MonitorService {
         })
     }
 
-    /// Get streamers assigned to this partition
-    fn get_assigned_streamers(&self) -> Vec<String> {
-        self.streamers
-            .iter()
-            .filter(|streamer| {
-                streamer.get_partition(self.partition_config.total_partitions)
-                    == self.partition_config.partition_id
-            })
-            .cloned()
-            .collect()
-    }
-
     /// Register service heartbeat
     async fn register_heartbeat(&self) -> Result<(), ServiceError> {
         let health_status = HealthStatus {
             partition_id: self.partition_config.partition_id,
             total_partitions: self.partition_config.total_partitions,
-            assigned_streamers: self.get_assigned_streamers(),
+            assigned_streamers: self.get_assigned_streamers().await?,
             last_heartbeat: Utc::now(),
             status: self.service_status.read().await.clone(),
         };
@@ -254,7 +263,7 @@ impl MonitorService {
         loop {
             tokio::select! {
                 _ = check_interval.tick() => {
-                    let assigned_streamers = self.get_assigned_streamers();
+                    let assigned_streamers = self.get_assigned_streamers().await?;
                     tracing_info!("Starting live check cycle for {} streamers", assigned_streamers.len());
 
                     for streamer in &assigned_streamers {
@@ -346,17 +355,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         partition_id,
     };
 
-    let streamers = vec![
-        "ilyaselmaliki".to_string(),
-        "111fox".to_string(),
-        "rainman-fps".to_string(),
-        "ahmedsabiri".to_string(),
-        "chaos333gg".to_string(),
-        "boushaq".to_string(),
-    ];
-
     // Create and run service
-    let service = MonitorService::new(settings, partition_config, streamers).await?;
+    let service = MonitorService::new(settings, partition_config).await?;
     let service = Arc::new(tokio::sync::RwLock::new(service));
     let service_clone = service.clone();
 
