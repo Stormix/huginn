@@ -59,6 +59,7 @@ services:
       - APP_HEALTH_CHECK_INTERVAL=30
       - APP_HEARTBEAT_INTERVAL=10
       - APP_RECOVERY_ATTEMPTS=3
+      - APP_KICK_URL=http://kick:3000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -87,8 +88,7 @@ services:
       - APP_HEALTH_CHECK_INTERVAL=30
       - APP_HEARTBEAT_INTERVAL=10
       - APP_RECOVERY_ATTEMPTS=3
-      - APP_FLARESOLVERR_URL=http://localhost:49767
-      - APP_FLARESOLVERR_MAX_TIMEOUT=5000
+      - APP_KICK_URL=http://kick:3000
     volumes:
       - .:/usr/src/app
       - target:/usr/src/app/target
@@ -106,8 +106,6 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-      flaresolverr:
-        condition: service_started
 
   collector_service:
     build:
@@ -125,6 +123,7 @@ services:
       - APP_HEALTH_CHECK_INTERVAL=30
       - APP_HEARTBEAT_INTERVAL=10
       - APP_RECOVERY_ATTEMPTS=3
+      - APP_KICK_URL=http://kick:3000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -147,14 +146,13 @@ services:
       - RUST_LOG=info
       - APP_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - APP_REDIS_URL=redis://redis:6379
-      - APP_DATABASE_URL=postgres://huginn:huginn_password@postgres:5432/huginn
+      - APP_DATABASE_URL=postgres://huginn:huginn_password@postgres:5433/huginn
       - APP_TOTAL_PARTITIONS=1
       - APP_PARTITION_ID=0
       - APP_HEALTH_CHECK_INTERVAL=30
       - APP_HEARTBEAT_INTERVAL=10
       - APP_RECOVERY_ATTEMPTS=3
-      - APP_FLARESOLVERR_URL=http://localhost:49767
-      - APP_FLARESOLVERR_MAX_TIMEOUT=5000
+      - APP_KICK_URL=http://kick:3000
     volumes:
       - .:/usr/src/app
       - target:/usr/src/app/target
@@ -172,19 +170,6 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-      flaresolverr:
-        condition: service_started
-
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    container_name: flaresolverr
-    environment:
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - LOG_HTML=${LOG_HTML:-false}
-      - TZ=Europe/London
-    ports:
-      - "8191:8191"
-    restart: unless-stopped
 
   writer_service:
     build:
@@ -196,14 +181,13 @@ services:
       - RUST_LOG=info
       - APP_RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - APP_REDIS_URL=redis://redis:6379
-      - APP_DATABASE_URL=postgres://huginn:huginn_password@postgres:5432/huginn
+      - APP_DATABASE_URL=postgres://huginn:huginn_password@postgres:5433/huginn
       - APP_TOTAL_PARTITIONS=1
       - APP_PARTITION_ID=0
       - APP_HEALTH_CHECK_INTERVAL=30
       - APP_HEARTBEAT_INTERVAL=10
       - APP_RECOVERY_ATTEMPTS=3
-      - APP_FLARESOLVERR_URL=http://localhost:49767
-      - APP_FLARESOLVERR_MAX_TIMEOUT=5000
+      - APP_KICK_URL=http://kick:3000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s

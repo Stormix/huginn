@@ -4,4 +4,4 @@ members = [
   "apps/collector/entity",
   "apps/collector/migration",
 ]
-resolver = "3"
+resolver = "2"

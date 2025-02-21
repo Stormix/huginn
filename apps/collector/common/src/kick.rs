@@ -4,6 +4,7 @@ use serde::Deserialize;
 use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KickResponse {
     pub success: bool,
     pub is_live: bool,

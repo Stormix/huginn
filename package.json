@@ -10,7 +10,8 @@
 		"build": "turbo run build",
 		"composer:dev": "docker compose up monitor_service_dev --build",
 		"collector:dev": "docker compose up collector_service_dev --build",
-		"dev": "docker compose up monitor_service_dev collector_service_dev writer_service --build"
+		"dev": "docker compose up monitor_service_dev collector_service_dev writer_service kick --build",
+		"start": "docker compose up monitor_service collector_service writer_service kick --build"
 	},
 	"devDependencies": {
 		"cross-env": "^7.0.3",
