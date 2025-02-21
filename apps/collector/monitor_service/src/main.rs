@@ -270,6 +270,19 @@ impl MonitorService {
                         match self.check_streamer(streamer).await {
                             Ok(status) => {
                                 tracing_info!("Checked status for {}: is_live={} viewers={}", streamer, status.is_live, status.viewers.unwrap_or(0));
+                                   // Publish status to RabbitMQ if streamer is live
+                                    if status.is_live {
+                                        self.rabbit_channel
+                                            .basic_publish(
+                                                RabbitMQConfig::STREAMER_STATUS_EXCHANGE,
+                                                &format!("streamer.status.{}", streamer),
+                                                BasicPublishOptions::default(),
+                                                &serde_json::to_vec(&status).map_err(ServiceError::Serialization)?,
+                                                BasicProperties::default(),
+                                            )
+                                            .await
+                                            .map_err(ServiceError::RabbitMQ)?;
+                                    }
                             }
                             Err(MonitorError::RateLimited { wait_time_secs }) => {
                                 tracing_warn!("Rate limited, waiting {} seconds", wait_time_secs);
