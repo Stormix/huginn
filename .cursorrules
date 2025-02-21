@@ -1,0 +1,196 @@
+You are an expert in Rust, TypeScript, async programming, and concurrent systems. Generate code, corrections, and refactorings that comply with the basic principles and nomenclature.
+
+## Rust General Guidelines
+
+### Key Principles for Rust Code
+- Write clear, concise, and idiomatic Rust code with accurate examples.
+- Use async programming paradigms effectively, leveraging `tokio` for concurrency.
+- Prioritize modularity, clean code organization, and efficient resource management.
+- Use expressive variable names that convey intent (e.g., `is_ready`, `has_data`).
+- Adhere to Rust's naming conventions: snake_case for variables and functions, PascalCase for types and structs.
+- Avoid code duplication; use functions and modules to encapsulate reusable logic.
+- Write code with safety, concurrency, and performance in mind, embracing Rust's ownership and type system.
+
+### Async Programming in Rust
+- Use `tokio` as the async runtime for handling asynchronous tasks and I/O.
+- Implement async functions using `async fn` syntax.
+- Leverage `tokio::spawn` for task spawning and concurrency.
+- Use `tokio::select!` for managing multiple async tasks and cancellations.
+- Favor structured concurrency: prefer scoped tasks and clean cancellation paths.
+- Implement timeouts, retries, and backoff strategies for robust async operations.
+
+### Channels and Concurrency in Rust
+- Use Rust's `tokio::sync::mpsc` for asynchronous, multi-producer, single-consumer channels.
+- Use `tokio::sync::broadcast` for broadcasting messages to multiple consumers.
+- Implement `tokio::sync::oneshot` for one-time communication between tasks.
+- Prefer bounded channels for backpressure; handle capacity limits gracefully.
+- Use `tokio::sync::Mutex` and `tokio::sync::RwLock` for shared state across tasks, avoiding deadlocks.
+
+### Error Handling and Safety in Rust
+- Embrace Rust's Result and Option types for error handling.
+- Use `?` operator to propagate errors in async functions.
+- Implement custom error types using `thiserror` or `anyhow` for more descriptive errors.
+- Handle errors and edge cases early, returning errors where appropriate.
+- Use `.await` responsibly, ensuring safe points for context switching.
+
+### Testing in Rust
+- Write unit tests with `tokio::test` for async tests.
+- Use `tokio::time::pause` for testing time-dependent code without real delays.
+- Implement integration tests to validate async behavior and concurrency.
+- Use mocks and fakes for external dependencies in tests.
+
+### Performance Optimization in Rust
+- Minimize async overhead; use sync code where async is not needed.
+- Avoid blocking operations inside async functions; offload to dedicated blocking threads if necessary.
+- Use `tokio::task::yield_now` to yield control in cooperative multitasking scenarios.
+- Optimize data structures and algorithms for async use, reducing contention and lock duration.
+- Use `tokio::time::sleep` and `tokio::time::interval` for efficient time-based operations.
+
+### Key Conventions in Rust
+1. Structure the application into modules: separate concerns like networking, database, and business logic.
+2. Use environment variables for configuration management (e.g., `dotenv` crate).
+3. Ensure code is well-documented with inline comments and Rustdoc.
+
+### Async Ecosystem in Rust
+- Use `tokio` for async runtime and task management.
+- Leverage `hyper` or `reqwest` for async HTTP requests.
+- Use `serde` for serialization/deserialization.
+- Use `sqlx` or `tokio-postgres` for async database interactions.
+- Utilize `tonic` for gRPC with async support.
+
+Refer to Rust's async book and `tokio` documentation for in-depth information on async patterns, best practices, and advanced features.
+  
+
+## TypeScript General Guidelines
+
+### Basic Principles
+
+- Use English for all code and documentation.
+- Always declare the type of each variable and function (parameters and return value).
+- Avoid using any.
+- Create necessary types.
+- Use JSDoc to document public classes and methods.
+- Don't leave blank lines within a function.
+- One export per file.
+
+### Nomenclature
+
+- Use PascalCase for classes.
+- Use camelCase for variables, functions, and methods.
+- Use kebab-case for file and directory names.
+- Use UPPERCASE for environment variables.
+- Avoid magic numbers and define constants.
+- Start each function with a verb.
+- Use verbs for boolean variables. Example: isLoading, hasError, canDelete, etc.
+- Use complete words instead of abbreviations and correct spelling.
+- Except for standard abbreviations like API, URL, etc.
+- Except for well-known abbreviations:
+  - i, j for loops
+  - err for errors
+  - ctx for contexts
+  - req, res, next for middleware function parameters
+
+### Functions
+
+- In this context, what is understood as a function will also apply to a method.
+- Write short functions with a single purpose. Less than 20 instructions.
+- Name functions with a verb and something else.
+- If it returns a boolean, use isX or hasX, canX, etc.
+- If it doesn't return anything, use executeX or saveX, etc.
+- Avoid nesting blocks by:
+  - Early checks and returns.
+  - Extraction to utility functions.
+- Use higher-order functions (map, filter, reduce, etc.) to avoid function nesting.
+- Use arrow functions for simple functions (less than 3 instructions).
+- Use named functions for non-simple functions.
+- Use default parameter values instead of checking for null or undefined.
+- Reduce function parameters using RO-RO
+  - Use an object to pass multiple parameters.
+  - Use an object to return results.
+  - Declare necessary types for input arguments and output.
+- Use a single level of abstraction.
+
+### Data
+
+- Don't abuse primitive types and encapsulate data in composite types.
+- Avoid data validations in functions and use classes with internal validation.
+- Prefer immutability for data.
+- Use readonly for data that doesn't change.
+- Use as const for literals that don't change.
+
+### Classes
+
+- Follow SOLID principles.
+- Prefer composition over inheritance.
+- Declare interfaces to define contracts.
+- Write small classes with a single purpose.
+  - Less than 200 instructions.
+  - Less than 10 public methods.
+  - Less than 10 properties.
+
+### Exceptions
+
+- Use exceptions to handle errors you don't expect.
+- If you catch an exception, it should be to:
+  - Fix an expected problem.
+  - Add context.
+  - Otherwise, use a global handler.
+
+### Testing
+
+- Follow the Arrange-Act-Assert convention for tests.
+- Name test variables clearly.
+- Follow the convention: inputX, mockX, actualX, expectedX, etc.
+- Write unit tests for each public function.
+- Use test doubles to simulate dependencies.
+  - Except for third-party dependencies that are not expensive to execute.
+- Write acceptance tests for each module.
+- Follow the Given-When-Then convention.
+
+
+## Commit Message Guidelines
+Guidelines for creating conventional commit messages:
+
+### Format
+
+#### General
+The format for commit messages using the conventional commits spec: 
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+The commit contains the following structural elements, to communicate intent to the consumers of your library:
+
+  - fix: a commit of the type fix patches a bug in your codebase (this correlates with PATCH in Semantic Versioning).
+  - feat: a commit of the type feat introduces a new feature to the codebase (this correlates with MINOR in Semantic Versioning).
+  - BREAKING CHANGE: a commit that has a footer BREAKING CHANGE:, or appends a ! after the type/scope, introduces a breaking API change (correlating with MAJOR in Semantic Versioning). A BREAKING CHANGE can be part of commits of any type.
+  - types other than fix: and feat: are allowed, for example @commitlint/config-conventional (based on the Angular convention) recommends build:, chore:, ci:, docs:, style:, refactor:, perf:, test:, and others.
+  - footers other than BREAKING CHANGE: <description> may be provided and follow a convention similar to git trailer format.
+
+### Rules
+- Format: `git commit -m "<type>(<scope>): <description>"`
+- Types: fix, feat, build, chore, ci, docs, style, refactor, perf, test
+- Scope: lowercase, refers to affected package/app (e.g., api, web, core)
+- Description: 
+  - Start with lowercase
+  - Use imperative mood ("add" not "added")
+  - No period at end
+  - Keep under 60 characters
+  - Be specific and concise
+
+Examples:
+```
+git commit -m "feat(api): add user authentication endpoint"
+git commit -m "fix(web): resolve login form validation issue"
+git commit -m "docs(core): update API documentation"
+```
+
+Note: Breaking changes append "!" after scope:
+```
+git commit -m "feat(api)!: change authentication API response format"
+```

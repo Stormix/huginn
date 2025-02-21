@@ -165,7 +165,7 @@ impl ChatCollector {
                     return Err(MonitorError::ApiError("Failed to get streamer info".into()));
                 }
 
-                Ok(response.chatroom_id)
+                Ok(response.chatroom_id.to_string())
             })
             .await
             .map_err(|e| ServiceError::ApiError(e.to_string()))

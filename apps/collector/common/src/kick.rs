@@ -11,7 +11,7 @@ pub struct KickResponse {
     pub is_live: bool,
     pub viewers: i32,
     pub title: String,
-    pub chatroom_id: String,
+    pub chatroom_id: i64,
 }
 
 #[derive(Clone)]
