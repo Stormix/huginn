@@ -95,7 +95,7 @@ export class KickService {
     // Create new page for this request
     const page = await this.browser!.newPage();
     try {
-      const response = await page.goto(`https://api.ipify.org/?format=json`, {
+      const response = await page.goto(`https://kick.com/api/v2/channels/${streamer}`, {
         waitUntil: 'networkidle2',
       });
 
