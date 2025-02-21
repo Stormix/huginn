@@ -1,6 +1,7 @@
 use crate::error::MonitorError;
 use reqwest::Client;
 use serde::Deserialize;
+use serde_json;
 use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
@@ -46,9 +47,16 @@ impl KickClient {
             return Err(MonitorError::RateLimited { wait_time_secs: 30 });
         }
 
-        response
-            .json::<KickResponse>()
+        // Get the response text first
+        let text = response
+            .text()
             .await
+            .map_err(|e| MonitorError::ApiError(format!("Failed to get response text: {}", e)))?;
+
+        println!("Raw response: {}", text);
+
+        // Parse the text into JSON
+        serde_json::from_str(&text)
             .map_err(|e| MonitorError::ApiError(format!("Failed to parse response: {}", e)))
     }
 }
