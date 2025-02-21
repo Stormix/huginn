@@ -26,15 +26,19 @@ jobs:
         with:
           filters: |
             monitor:
+              - '.github/workflows/**'
               - 'apps/collector/monitor_service/**'
-              - 'packages/common/**'
+              - 'apps/collector/common/**'
             collector:
+              - '.github/workflows/**'
               - 'apps/collector/collector_service/**'
-              - 'packages/common/**'
+              - 'apps/collector/common/**'
             writer:
+              - '.github/workflows/**'
               - 'apps/collector/writer_service/**'
-              - 'packages/common/**'
+              - 'apps/collector/common/**'
             kick:
+              - '.github/workflows/**'
               - 'apps/kick/**'
               - 'packages/**'
 
