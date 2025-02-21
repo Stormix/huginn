@@ -6,7 +6,7 @@ interface CheckStreamerResponse {
   isLive: boolean;
   viewers: number;
   title: string;
-  chatroomId: string;
+  chatroomId: number;
 }
 
 type PuppeteerBrowser = Awaited<ReturnType<typeof connect>>['browser'];
@@ -106,7 +106,7 @@ export class KickService {
           isLive: false,
           viewers: 0,
           title: '',
-          chatroomId: '',
+          chatroomId: 0,
         };
       }
 
@@ -129,7 +129,7 @@ export class KickService {
         isLive: false,
         viewers: 0,
         title: '',
-        chatroomId: '',
+        chatroomId: 0,
       };
     } finally {
       // Always close the page to free up resources
