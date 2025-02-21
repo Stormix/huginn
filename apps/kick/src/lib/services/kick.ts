@@ -6,6 +6,7 @@ interface CheckStreamerResponse {
   isLive: boolean;
   viewers: number;
   title: string;
+  chatroomId: string;
 }
 
 type PuppeteerBrowser = Awaited<ReturnType<typeof connect>>['browser'];
@@ -105,6 +106,7 @@ export class KickService {
           isLive: false,
           viewers: 0,
           title: '',
+          chatroomId: '',
         };
       }
 
@@ -118,6 +120,7 @@ export class KickService {
         isLive: data.livestream?.is_live ?? false,
         viewers: data.livestream?.viewer_count ?? 0,
         title: data.livestream?.session_title ?? '',
+        chatroomId: data.chatroom?.id ?? '',
       };
     } catch (error) {
       console.error(`Error checking streamer ${streamer}:`, error);
@@ -126,6 +129,7 @@ export class KickService {
         isLive: false,
         viewers: 0,
         title: '',
+        chatroomId: '',
       };
     } finally {
       // Always close the page to free up resources

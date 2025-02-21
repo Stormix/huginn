@@ -3,7 +3,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::warn;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RecoveryManager {
     max_attempts: u32,
     base_delay: Duration,

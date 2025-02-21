@@ -1,3 +1,4 @@
+use actix_web::{App, HttpResponse, HttpServer, web};
 use chrono::Utc;
 use common::RabbitMQConfig;
 use common::{ChatMessage, ServiceError, config::ServiceConfig};
@@ -8,9 +9,8 @@ use lapin::{Channel, Connection, ConnectionProperties, Consumer, options::*, typ
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
 use serde_json::from_slice;
-use tracing::{error, info};
-use actix_web::{web, App, HttpResponse, HttpServer};
 use serde_json::json;
+use tracing::{error, info};
 
 #[derive(Clone)]
 struct WriterService {
@@ -159,11 +159,10 @@ async fn main() -> Result<(), ServiceError> {
 
     let service = WriterService::new().await?;
     let service_handle = service.start();
-    let health_server = HttpServer::new(|| {
-        App::new().route("/health", web::get().to(health_check))
-    })
-    .bind("0.0.0.0:8080")?
-    .run();
+    let health_server =
+        HttpServer::new(|| App::new().route("/health", web::get().to(health_check)))
+            .bind("0.0.0.0:8080")?
+            .run();
 
     // Run both the main service and health check server
     tokio::select! {

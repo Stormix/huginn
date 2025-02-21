@@ -1,9 +1,9 @@
 pub mod error;
-pub mod flaresolverr;
-pub mod proxy;
+pub mod kick;
 pub mod recovery;
 
 use chrono::{DateTime, Utc};
+use error::MonitorError;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -143,6 +143,27 @@ pub enum ServiceError {
 
     #[error("Configuration error: {0}")]
     Configuration(String),
+}
+
+impl From<MonitorError> for ServiceError {
+    fn from(error: MonitorError) -> Self {
+        match error {
+            MonitorError::Configuration(msg) => ServiceError::Configuration(msg),
+            MonitorError::ApiError(msg) => ServiceError::ApiError(msg),
+            MonitorError::RateLimited { wait_time_secs } => {
+                ServiceError::ApiError(format!("Rate limited, wait {} seconds", wait_time_secs))
+            }
+            MonitorError::Service(msg) => ServiceError::ApiError(msg.to_string()),
+            MonitorError::RecoveryFailed { attempts, message } => ServiceError::ApiError(format!(
+                "Recovery failed after {} attempts: {}",
+                attempts, message
+            )),
+            MonitorError::PartitionError(msg) => ServiceError::Partition(msg),
+            MonitorError::Other(err) => ServiceError::ApiError(err.to_string()),
+            MonitorError::ApiProxyError(msg) => ServiceError::ApiProxyError(msg),
+            MonitorError::SerializationError(err) => ServiceError::Serialization(err),
+        }
+    }
 }
 
 /// Redis keys and prefixes
@@ -285,9 +306,8 @@ pub mod config {
         pub heartbeat_interval: u64,
         pub recovery_attempts: u32,
         pub total_partitions: u32,
-        pub flaresolverr_url: String,
-        pub flaresolverr_max_timeout: u32,
         pub partition: String,
+        pub kick_url: String,
     }
 
     impl ServiceConfig {

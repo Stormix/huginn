@@ -10,9 +10,7 @@ app.get('/check/:streamer', async (c) => {
   const streamer = c.req.param('streamer');
   const result = await service.checkStreamer(streamer);
 
-  return c.json({
-    isLive: result,
-  });
+  return c.json(result);
 });
 
 export default {

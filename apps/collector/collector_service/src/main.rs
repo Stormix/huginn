@@ -3,8 +3,8 @@ mod kick;
 use actix_web::{App, HttpResponse, HttpServer, web};
 use chrono::Utc;
 use common::config::ServiceConfig;
-use common::flaresolverr::FlareSolverrClient;
-use common::proxy::ProxyManager;
+use common::error::MonitorError;
+use common::kick::KickClient;
 use common::recovery::RecoveryManager;
 use common::{
     ChatMessage, ChatMessageMetadata, PartitionConfig, RabbitMQConfig, ServiceError, ServiceStatus,
@@ -21,13 +21,14 @@ use tokio::sync::{RwLock, mpsc};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{error, info};
 
+#[derive(Clone)]
 struct ChatCollector {
     partition_config: PartitionConfig,
     rabbit_consumer: Consumer,
     redis_client: redis::Client,
     active_connections: Arc<RwLock<HashMap<String, WebSocketConnection>>>,
     service_status: Arc<RwLock<ServiceStatus>>,
-    proxy_manager: ProxyManager,
+    kick_client: KickClient,
     recovery_manager: RecoveryManager,
     rabbit_channel: lapin::Channel,
 }
@@ -46,11 +47,14 @@ impl ChatCollector {
     ) -> Result<Self, ServiceError> {
         info!("Initializing ChatCollector service");
 
+        // Initialize kick client
+        let kick_client = KickClient::new(config.kick_url)?;
+        info!("Kick client initialized");
+
         // Initialize RabbitMQ connection
         info!("Connecting to RabbitMQ...");
         let conn =
             Connection::connect(&config.rabbitmq_url, ConnectionProperties::default()).await?;
-
         let channel = conn.create_channel().await?;
 
         // Declare exchanges and queues
@@ -128,10 +132,6 @@ impl ChatCollector {
         info!("Connecting to Redis...");
         let redis_client = redis::Client::open(config.redis_url)?;
 
-        let proxy_manager =
-            ProxyManager::new().map_err(|e| ServiceError::ProxyError(e.to_string()))?;
-        info!("Proxy manager initialized");
-
         let recovery_manager = RecoveryManager::new(
             3,                       // max attempts
             Duration::from_secs(1),  // base delay
@@ -146,7 +146,7 @@ impl ChatCollector {
             redis_client,
             active_connections: Arc::new(RwLock::new(HashMap::new())),
             service_status: Arc::new(RwLock::new(ServiceStatus::Starting)),
-            proxy_manager,
+            kick_client,
             recovery_manager,
             rabbit_channel: channel,
         })
@@ -155,24 +155,17 @@ impl ChatCollector {
     async fn get_chatroom_id(&self, streamer: &str) -> Result<String, ServiceError> {
         self.recovery_manager
             .execute(|| async {
-                let url = format!("https://kick.com/api/v2/channels/{}", streamer);
                 let response = self
-                    .proxy_manager
-                    .make_request(&url)
+                    .kick_client
+                    .check_streamer(streamer)
                     .await
-                    .map_err(|e| ServiceError::ApiError(e.to_string()))?;
+                    .map_err(|e| MonitorError::ApiError(e.to_string()))?;
 
-                let json: serde_json::Value = serde_json::from_str(&response)
-                    .map_err(|e| ServiceError::ParseError(e.to_string()))?;
+                if !response.success {
+                    return Err(MonitorError::ApiError("Failed to get streamer info".into()));
+                }
 
-                let chatroom_id =
-                    json["chatroom"]["id"]
-                        .as_u64()
-                        .ok_or(ServiceError::ParseError(
-                            "Chatroom ID not found".to_string(),
-                        ))?;
-
-                Ok(chatroom_id.to_string())
+                Ok(response.chatroom_id)
             })
             .await
             .map_err(|e| ServiceError::ApiError(e.to_string()))
@@ -413,9 +406,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let partition_id = config
         .partition
-        .to_string()
         .split('-')
-        .last()
+        .next_back()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(0);
 
@@ -429,14 +421,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         partition_id,
     };
 
-    // Create and run service
-    let mut service = ChatCollector::new(config, partition_config).await?;
-    let service_handle = service.run();
+    // Create service
+    let service = ChatCollector::new(config, partition_config).await?;
+    let mut service_clone = service.clone();
+    let service_handle = tokio::spawn(async move { service_clone.run().await });
 
     let health_server =
         HttpServer::new(|| App::new().route("/health", web::get().to(health_check)))
             .bind("0.0.0.0:8080")?
             .run();
+
+    // Set up signal handlers for both ctrl-c and termination
+    let ctrl_c = tokio::signal::ctrl_c();
 
     // Run both the main service and health check server
     tokio::select! {
@@ -450,6 +446,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 error!("Service error: {:?}", e);
             }
         }
+        _ = ctrl_c => {
+            info!("Received SIGINT (Ctrl+C) signal");
+        }
+    }
+
+    // Perform graceful shutdown
+    if let Err(e) = service.shutdown().await {
+        error!("Error during shutdown: {:?}", e);
     }
 
     Ok(())

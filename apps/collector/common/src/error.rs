@@ -24,7 +24,7 @@ pub enum MonitorError {
     ApiProxyError(String),
 
     #[error("Serialization error: {0}")]
-    SerializationError(String),
+    SerializationError(#[from] serde_json::Error),
 
     #[error("Configuration error: {0}")]
     Configuration(String),

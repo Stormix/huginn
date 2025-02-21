@@ -1,5 +1,5 @@
 use common::error::MonitorError;
-use common::proxy::ProxyManager;
+use common::kick::KickClient;
 use common::recovery::RecoveryManager;
 use common::{
     AlertType, HealthStatus, PartitionConfig, Partitionable, RabbitMQConfig, RecoveryState,
@@ -31,7 +31,7 @@ struct MonitorService {
     service_status: Arc<tokio::sync::RwLock<ServiceStatus>>,
     recovery_manager: RecoveryManager,
     error_counter: Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
-    proxy_manager: ProxyManager,
+    kick_client: KickClient,
 }
 
 impl MonitorService {
@@ -42,28 +42,9 @@ impl MonitorService {
     ) -> Result<Self, ServiceError> {
         tracing_info!("Initializing monitor service");
 
-        // Initialize proxy manager
-        let proxy_manager =
-            ProxyManager::new().map_err(|e| ServiceError::ProxyError(e.to_string()))?;
-
-        // Test proxy connection
-        tracing_info!("Testing proxy connection...");
-        let ip_test_url = "https://api.ipify.org?format=json";
-
-        match proxy_manager.make_request(ip_test_url).await {
-            Ok(response) => {
-                let ip_data: serde_json::Value = serde_json::from_str(&response).map_err(|e| {
-                    ServiceError::ProxyError(format!("Failed to parse IP test response: {}", e))
-                })?;
-                tracing_info!("Proxy test successful - using IP: {}", ip_data["ip"]);
-            }
-            Err(e) => {
-                return Err(ServiceError::ProxyError(format!(
-                    "Proxy test failed: {}",
-                    e
-                )));
-            }
-        }
+        // Initialize kick client
+        let kick_client = KickClient::new(config.kick_url)?;
+        tracing_info!("Kick client initialized");
 
         // Initialize RabbitMQ connection
         let conn =
@@ -99,34 +80,21 @@ impl MonitorService {
             service_status: Arc::new(tokio::sync::RwLock::new(ServiceStatus::Starting)),
             recovery_manager,
             error_counter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            proxy_manager,
+            kick_client,
         })
     }
 
     /// Check streamer status
     async fn make_api_call(&self, username: &str) -> Result<StreamerStatus, MonitorError> {
-        let url = format!("https://kick.com/api/v2/channels/{}", username);
+        let response = self.kick_client.check_streamer(username).await?;
 
-        // Make request using proxy manager
-        let response_body = self.proxy_manager.make_request(&url).await?;
-
-        // Parse the response
-        let data = serde_json::from_str::<serde_json::Value>(&response_body)
-            .map_err(|e| MonitorError::ApiError(format!("Failed to parse JSON: {}", e)))?;
-
-        // Extract relevant fields from the response
         Ok(StreamerStatus {
             username: username.to_string(),
-            is_live: data["livestream"].is_object()
-                && data["livestream"]["is_live"].as_bool().unwrap_or(false),
+            is_live: response.is_live,
             timestamp: Utc::now(),
-            viewers: data["livestream"]["viewer_count"]
-                .as_u64()
-                .map(|v| v as i32),
-            stream_id: data["livestream"]["id"].as_u64().map(|id| id.to_string()),
-            title: data["livestream"]["session_title"]
-                .as_str()
-                .map(|s| s.to_string()),
+            viewers: Some(response.viewers),
+            stream_id: None, // Not provided by the new API
+            title: Some(response.title),
         })
     }
 
@@ -364,7 +332,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let partition_id = settings
         .partition
         .split('-')
-        .last()
+        .next_back()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(0);
 
