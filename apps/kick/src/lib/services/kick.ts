@@ -18,10 +18,10 @@ export class KickService {
   private readonly PROXY_MANAGER = proxyManager;
 
   constructor() {
-    // Initialize by checking and removing any failed proxies
-    this.PROXY_MANAGER.removeFailedProxies().catch((error) => {
-      console.error('Failed to initialize proxy checker:', error);
-    });
+    // // Initialize by checking and removing any failed proxies
+    // this.PROXY_MANAGER.removeFailedProxies().catch((error) => {
+    //   console.error('Failed to initialize proxy checker:', error);
+    // });
   }
 
   private async closeBrowser() {
