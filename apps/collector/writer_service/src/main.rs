@@ -60,7 +60,7 @@ impl WriterService {
             .queue_bind(
                 RabbitMQConfig::CHAT_MESSAGES_QUEUE,
                 RabbitMQConfig::CHAT_MESSAGES_EXCHANGE,
-                "chat.message",
+                RabbitMQConfig::CHAT_MESSAGES_ROUTING_KEY,
                 QueueBindOptions::default(),
                 FieldTable::default(),
             )
@@ -84,11 +84,19 @@ impl WriterService {
             let db = self.db.clone();
 
             let handle = tokio::spawn(async move {
+                // Set QoS for this specific consumer channel
+                channel.basic_qos(25, BasicQosOptions::default()).await?;
+
                 let consumer = channel
                     .basic_consume(
                         RabbitMQConfig::CHAT_MESSAGES_QUEUE,
                         &format!("writer_consumer_{}", i),
-                        BasicConsumeOptions::default(),
+                        BasicConsumeOptions {
+                            no_local: false,
+                            no_ack: false,
+                            exclusive: false,
+                            nowait: false,
+                        },
                         FieldTable::default(),
                     )
                     .await?;
