@@ -7,13 +7,16 @@ use common::error::MonitorError;
 use common::kick::KickClient;
 use common::recovery::RecoveryManager;
 use common::{
-    ChatMessage, ChatMessageMetadata, PartitionConfig, RabbitMQConfig, ServiceError, ServiceStatus,
-    StreamerStatus,
+    ChatMessage, ChatMessageMetadata, PartitionConfig, Partitionable, RabbitMQConfig, ServiceError,
+    ServiceStatus, StreamerStatus,
 };
+use entity::streamer::Entity;
 use futures::{SinkExt, StreamExt};
 use lapin::{
     BasicProperties, Connection, ConnectionProperties, Consumer, options::*, types::FieldTable,
 };
+use sea_orm::Database;
+use sea_orm::EntityTrait;
 use serde_json::json;
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc};
@@ -31,6 +34,7 @@ struct ChatCollector {
     kick_client: KickClient,
     recovery_manager: RecoveryManager,
     rabbit_channel: lapin::Channel,
+    db: &'static sea_orm::DatabaseConnection,
 }
 
 #[allow(dead_code)]
@@ -44,6 +48,7 @@ impl ChatCollector {
     async fn new(
         config: ServiceConfig,
         partition_config: PartitionConfig,
+        db: &'static sea_orm::DatabaseConnection,
     ) -> Result<Self, ServiceError> {
         info!("Initializing ChatCollector service");
 
@@ -149,6 +154,7 @@ impl ChatCollector {
             kick_client,
             recovery_manager,
             rabbit_channel: channel,
+            db,
         })
     }
 
@@ -331,20 +337,72 @@ impl ChatCollector {
         Ok(())
     }
 
+    async fn get_assigned_streamers(&self) -> Result<Vec<String>, ServiceError> {
+        let all_streamers = Entity::find()
+            .all(self.db)
+            .await?
+            .into_iter()
+            .map(|s| s.username)
+            .collect::<Vec<String>>();
+
+        Ok(all_streamers
+            .into_iter()
+            .filter(|streamer| {
+                streamer.get_partition(self.partition_config.total_partitions)
+                    == self.partition_config.partition_id
+            })
+            .collect())
+    }
+
     async fn run(&mut self) -> Result<(), ServiceError> {
         info!("Starting chat collector service");
         *self.service_status.write().await = ServiceStatus::Healthy;
 
+        // Get initial list of assigned streamers
+        let assigned_streamers = self.get_assigned_streamers().await?;
+        info!("Found {} assigned streamers", assigned_streamers.len());
+
+        // Spawn a task for each assigned streamer
+        let mut streamer_tasks = Vec::new();
+        for streamer in assigned_streamers {
+            let collector_clone = self.clone();
+            let task = tokio::spawn(async move {
+                loop {
+                    match collector_clone.connect_to_chat(&streamer).await {
+                        Ok(()) => {
+                            info!("Connected to {}'s chat", streamer);
+                            // Wait for disconnect or error
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                        Err(e) => {
+                            error!("Error connecting to {}'s chat: {:?}", streamer, e);
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                        }
+                    }
+                }
+            });
+            streamer_tasks.push(task);
+        }
+
+        // Monitor RabbitMQ for streamer status updates
         while let Some(delivery) = self.rabbit_consumer.next().await {
             match delivery {
                 Ok(delivery) => {
                     let status: StreamerStatus = serde_json::from_slice(&delivery.data)?;
 
-                    if let Err(e) = self.handle_streamer_status(status).await {
-                        error!("Error handling streamer status: {:?}", e);
+                    if status
+                        .username
+                        .get_partition(self.partition_config.total_partitions)
+                        == self.partition_config.partition_id
+                    {
+                        if let Err(e) = self.handle_streamer_status(status).await {
+                            error!("Error handling streamer status: {:?}", e);
+                        }
+                        delivery.ack(BasicAckOptions::default()).await?;
+                    } else {
+                        // Reject messages not meant for this partition
+                        delivery.nack(BasicNackOptions::default()).await?;
                     }
-
-                    delivery.ack(BasicAckOptions::default()).await?;
                 }
                 Err(e) => {
                     error!("Error receiving message: {:?}", e);
@@ -421,8 +479,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         partition_id,
     };
 
-    // Create service
-    let service = ChatCollector::new(config, partition_config).await?;
+    let db = Database::connect(&config.database_url).await?;
+    let db = Box::leak(Box::new(db)); // Convert to static reference
+    let service = ChatCollector::new(config, partition_config, db).await?;
     let mut service_clone = service.clone();
     let service_handle = tokio::spawn(async move { service_clone.run().await });
 

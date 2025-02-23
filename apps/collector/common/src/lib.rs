@@ -308,6 +308,7 @@ pub mod config {
         pub total_partitions: u32,
         pub partition: String,
         pub kick_url: String,
+        pub num_consumers: u32,
     }
 
     impl ServiceConfig {
@@ -316,6 +317,9 @@ pub mod config {
             dotenv().ok();
 
             let mut s = Config::new();
+
+            // Add default value for num_consumers
+            s.set_default("num_consumers", 4)?;
 
             // Add in settings from the environment (with a prefix of APP)
             // Eg.. `APP_DATABASE_URL=postgres://... would set the `database_url` key

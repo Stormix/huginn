@@ -21,7 +21,12 @@ struct WriterService {
 impl WriterService {
     async fn new() -> Result<Self, ServiceError> {
         let config = ServiceConfig::new().expect("Failed to load configuration");
-        let db = Database::connect(&config.database_url).await?;
+        let db = Database::connect(
+            sea_orm::ConnectOptions::new(&config.database_url)
+                .sqlx_logging(false)
+                .to_owned(),
+        )
+        .await?;
 
         // Run migrations
         info!("Running database migrations...");
@@ -61,42 +66,75 @@ impl WriterService {
             )
             .await?;
 
-        // Set up consumer
+        // Set QoS (prefetch) for better load management
         rabbit_channel
-            .basic_consume(
-                RabbitMQConfig::CHAT_MESSAGES_QUEUE,
-                "chat_writer",
-                BasicConsumeOptions::default(),
-                FieldTable::default(),
-            )
+            .basic_qos(100, BasicQosOptions::default())
             .await?;
 
         Ok(Self { db, rabbit_channel })
     }
 
     async fn start(&self) -> Result<(), ServiceError> {
-        let consumer = self
-            .rabbit_channel
-            .basic_consume(
-                RabbitMQConfig::CHAT_MESSAGES_QUEUE,
-                "writer_consumer",
-                BasicConsumeOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
+        let config = ServiceConfig::new().expect("Failed to load configuration");
+        let mut handles = Vec::new();
 
-        self.process_messages(consumer).await
+        for i in 0..config.num_consumers {
+            // Create 4 parallel consumers
+            let channel = self.rabbit_channel.clone();
+            let db = self.db.clone();
+
+            let handle = tokio::spawn(async move {
+                let consumer = channel
+                    .basic_consume(
+                        RabbitMQConfig::CHAT_MESSAGES_QUEUE,
+                        &format!("writer_consumer_{}", i),
+                        BasicConsumeOptions::default(),
+                        FieldTable::default(),
+                    )
+                    .await?;
+
+                process_messages(consumer, db).await
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all consumers to complete (or error)
+        for handle in handles {
+            match handle.await {
+                Ok(Ok(())) => (),
+                Ok(Err(e)) => error!("Consumer error: {:?}", e),
+                Err(e) => error!("Join error: {:?}", e),
+            }
+        }
+
+        Ok(())
     }
+}
 
-    async fn process_messages(&self, mut consumer: Consumer) -> Result<(), ServiceError> {
-        while let Some(delivery) = consumer.next().await {
-            match delivery {
-                Ok(delivery) => match self.handle_message(&delivery.data).await {
+// Move process_messages out of impl to avoid self reference
+async fn process_messages(
+    mut consumer: Consumer,
+    db: DatabaseConnection,
+) -> Result<(), ServiceError> {
+    // Use a batch size for processing multiple messages
+    let mut batch = Vec::with_capacity(100);
+
+    while let Some(delivery) = consumer.next().await {
+        match delivery {
+            Ok(delivery) => {
+                match handle_message(&delivery.data, &db).await {
                     Ok(_) => {
-                        delivery
-                            .ack(BasicAckOptions::default())
-                            .await
-                            .map_err(ServiceError::RabbitMQ)?;
+                        batch.push(delivery);
+
+                        // Process batch acknowledgments
+                        if batch.len() >= 100 {
+                            for del in batch.drain(..) {
+                                del.ack(BasicAckOptions::default())
+                                    .await
+                                    .map_err(ServiceError::RabbitMQ)?;
+                            }
+                        }
                     }
                     Err(e) => {
                         error!("Error processing message: {}", e);
@@ -105,37 +143,52 @@ impl WriterService {
                             .await
                             .map_err(ServiceError::RabbitMQ)?;
                     }
-                },
-                Err(e) => error!("Error receiving message: {}", e),
+                }
             }
+            Err(e) => error!("Error receiving message: {}", e),
         }
-        Ok(())
     }
 
-    async fn handle_message(&self, data: &[u8]) -> Result<(), ServiceError> {
-        let chat_message: ChatMessage = from_slice(data).map_err(ServiceError::Serialization)?;
-
-        let chat_message_model = ChatMessageModel {
-            streamer: Set(chat_message.streamer.clone()),
-            username: Set(chat_message.username.clone()),
-            message: Set(chat_message.message),
-            timestamp: Set(chat_message.timestamp),
-            metadata: Set(Some(serde_json::to_value(chat_message.metadata)?)),
-            created_at: Set(Utc::now()),
-            ..Default::default()
-        };
-
-        chat_message_model
-            .insert(&self.db)
+    // Acknowledge any remaining messages in the batch
+    for del in batch {
+        del.ack(BasicAckOptions::default())
             .await
-            .map_err(ServiceError::Database)?;
-
-        info!(
-            "Stored chat message from {} in #{} in database",
-            chat_message.username, chat_message.streamer
-        );
-        Ok(())
+            .map_err(ServiceError::RabbitMQ)?;
     }
+
+    Ok(())
+}
+
+// Move handle_message out of impl and modify to take DatabaseConnection
+async fn handle_message(data: &[u8], db: &DatabaseConnection) -> Result<(), ServiceError> {
+    let chat_message: ChatMessage = from_slice(data).map_err(ServiceError::Serialization)?;
+
+    info!(
+        "Processing message from {} in #{} at {}",
+        chat_message.username, chat_message.streamer, chat_message.timestamp
+    );
+
+    let chat_message_model = ChatMessageModel {
+        streamer: Set(chat_message.streamer.clone()),
+        username: Set(chat_message.username.clone()),
+        message: Set(chat_message.message),
+        timestamp: Set(chat_message.timestamp),
+        metadata: Set(Some(serde_json::to_value(chat_message.metadata)?)),
+        created_at: Set(Utc::now()),
+        ..Default::default()
+    };
+
+    let result = chat_message_model
+        .insert(db)
+        .await
+        .map_err(ServiceError::Database)?;
+
+    info!(
+        "Successfully stored message (id: {}) from {} in #{} at {}",
+        result.id, chat_message.username, chat_message.streamer, chat_message.timestamp
+    );
+
+    Ok(())
 }
 
 async fn health_check() -> HttpResponse {
